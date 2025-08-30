@@ -2,36 +2,90 @@
 
 #include "FBXLoader.h"
 #include "FBXExporter.h"
-// »ç¿ë ¿¹½Ã ÄÚµå
-void ExampleUsage()
-{
+// ï¿½ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½ ï¿½Úµï¿½
+//void ExampleUsage()
+//{
+//	FBXLoader loader;
+//
+//	// FBX ï¿½ï¿½ï¿½ï¿½ ï¿½Îµï¿½
+//	loader.LoadFbx("..\\Resources\\FBX\\Dragon.fbx");
+//
+//	// ï¿½ï¿½ï¿½Ì³Ê¸ï¿½ ï¿½ï¿½ï¿½Ï·ï¿½ export
+//	if (loader.ExportToBinary("..\\Resources\\FBX\\Dragon.bin"))
+//	{
+//		// ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ exportï¿½ï¿½
+//		std::wcout << L"Successfully exported to binary format!" << std::endl;
+//	}
+//	else
+//	{
+//		// export ï¿½ï¿½ï¿½ï¿½
+//		std::wcerr << L"Failed to export to binary format!" << std::endl;
+//	}
+//}
+//int main() {
+//	
+//
+//
+//	std::string modelName{ "" };
+//
+//	FBXLoader importer;
+//
+//	FBXExporter exporter;
+//
+//	ExampleUsage();
+//
+//}
+
+//int main(int argc, char** argv) {
+
+	
+int main() {
 	FBXLoader loader;
 
-	// FBX ÆÄÀÏ ·Îµå
-	loader.LoadFbx(L"..\\Resources\\FBX\\Dragon.fbx");
+	int argc = 1;
+	std::string in{/*argv[1]*/ };
+	std::string out{/*argv[2]*/};
 
-	// ¹ÙÀÌ³Ê¸® ÆÄÀÏ·Î export
-	if (loader.ExportToBinary(L"..\\Resources\\FBX\\Dragon.bin"))
+	if (in == "") {
+		std::cin >> in;
+	}
+	
+
+	if (argc < 1) {
+		printf("Usage: FbxToBin.exe <input.fbx> <output.bin>\n");
+		return 0;
+	}
+	else if (argc < 2) {
+		printf("ExportToBinary Data has been exported to .bin file. \n");
+		out = fs::path(in).parent_path().string() + "\\" + fs::path(in).filename().stem().string() + ".bin";
+	}
+	
+
+	//loader.LoadFbx("..\\Resources\\FBX\\Dragon.fbx");
+	loader.LoadFbx(in);
+
+	// ï¿½ï¿½ï¿½Ì³Ê¸ï¿½ ï¿½ï¿½ï¿½Ï·ï¿½ export
+	//if (loader.ExportToBinary("..\\Resources\\FBX\\Dragon.bin"))
+	if (loader.ExportToBinary(out))
 	{
-		// ¼º°øÀûÀ¸·Î exportµÊ
+		// ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ exportï¿½ï¿½
 		std::wcout << L"Successfully exported to binary format!" << std::endl;
 	}
 	else
 	{
-		// export ½ÇÆÐ
+		// export ï¿½ï¿½ï¿½ï¿½
 		std::wcerr << L"Failed to export to binary format!" << std::endl;
 	}
-}
-int main() {
-	
 
 
-	std::string modelName{ "" };
+	//ConvertOptions opt{};
+	//if (argc >= 4) opt.sampleRate = std::atof(argv[3]);
 
-	FBXLoader importer;
 
-	FBXExporter exporter;
-
-	ExampleUsage();
-
+	//if (!std::filesystem::exists(in)) {
+	//	printf("[ERR] Input not found.\n");
+	//	return 1;
+	//}
+	//bool ok = ConvertFbxToBin(in, out, opt);
+	//return ok ? 0 : 2;
 }

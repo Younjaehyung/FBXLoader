@@ -4,13 +4,13 @@
 
 struct FbxMaterialInfo
 {
-	Vec4			diffuse;
-	Vec4			ambient;
-	Vec4			specular;
-	wstring			name;
-	wstring			diffuseTexName;
-	wstring			normalTexName;
-	wstring			specularTexName;
+	Vec4			diffuse{};
+	Vec4			ambient{};
+	Vec4			specular{};
+	string			name{"UNKNOWN"};
+	string			diffuseTexName{};
+	string			normalTexName{};
+	string			specularTexName{};
 };
 
 struct BoneWeight
@@ -46,7 +46,7 @@ struct BoneWeight
 
 struct FbxMeshInfo
 {
-	wstring								name;
+	string								name;
 	vector<Vertex>						vertices;
 	vector<vector<uint32>>				indices;
 	vector<FbxMaterialInfo>				materials;
@@ -62,19 +62,20 @@ struct FbxKeyFrameInfo
 
 struct FbxBoneInfo
 {
-	wstring					boneName;
+	string					boneName;
 	int32					parentIndex;
 	FbxAMatrix				matOffset;
 };
 
 struct FbxAnimClipInfo
 {
-	wstring			name;
+	string			name;
 	FbxTime			startTime;
 	FbxTime			endTime;
 	FbxTime::EMode	mode;
 	vector<vector<FbxKeyFrameInfo>>	keyFrames;
 };
+
 
 
 
@@ -147,7 +148,7 @@ public:
 	~FBXLoader();
 
 public:
-	void LoadFbx(const wstring& path);
+	void LoadFbx(const string& path);
 
 public:
 	int32 GetMeshCount() { return static_cast<int32>(_meshes.size()); }
@@ -155,7 +156,7 @@ public:
 	vector<shared_ptr<FbxBoneInfo>>& GetBones() { return _bones; }
 	vector<shared_ptr<FbxAnimClipInfo>>& GetAnimClip() { return _animClips; }
 private:
-	void Import(const wstring& path);
+	void Import(const string& path);
 
 	void ParseNode(FbxNode* root);
 	void LoadMesh(FbxMesh* mesh);
@@ -165,7 +166,7 @@ private:
 	void		GetTangent(FbxMesh* mesh, FbxMeshInfo* container, int32 idx, int32 vertexCounter);
 	void		GetUV(FbxMesh* mesh, FbxMeshInfo* container, int32 idx, int32 vertexCounter);
 	Vec4		GetMaterialData(FbxSurfaceMaterial* surface, const char* materialName, const char* factorName);
-	wstring		GetTextureRelativeName(FbxSurfaceMaterial* surface, const char* materialProperty);
+	string		GetTextureRelativeName(FbxSurfaceMaterial* surface, const char* materialProperty);
 
 	//void CreateTextures();
 	//void CreateMaterials();
@@ -187,24 +188,24 @@ private:
 
 public:
 	// 추가: 바이너리 export 함수들
-	bool ExportToBinary(const wstring& outputPath);
+	bool ExportToBinary(const string& outputPath);
 
 private:
 	// 바이너리 export 헬퍼 함수들
-	void WriteString(std::ofstream& file, const wstring& str);
+	void WriteString(std::ofstream& file, const string& str);
 	void WriteMeshData(std::ofstream& file, const FbxMeshInfo& meshInfo);
 	void WriteMaterialData(std::ofstream& file, const FbxMaterialInfo& materialInfo);
 	void WriteBoneData(std::ofstream& file, const shared_ptr<FbxBoneInfo>& boneInfo);
 	void WriteAnimClipData(std::ofstream& file, const shared_ptr<FbxAnimClipInfo>& animClipInfo);
 
 	// 바이너리 import 함수들 (향후 게임에서 사용)
-	wstring ReadString(std::ifstream& file);
-	bool LoadFromBinary(const wstring& inputPath);
+	string ReadString(std::ifstream& file);
+	bool LoadFromBinary(const string& inputPath);
 private:
-	FbxManager* _manager = nullptr;
-	FbxScene* _scene = nullptr;
-	FbxImporter* _importer = nullptr;
-	wstring			_resourceDirectory;
+	FbxManager*		_manager	= nullptr;
+	FbxScene*		_scene		= nullptr;
+	FbxImporter*	_importer	= nullptr;
+	string			_resourceDirectory;
 
 	vector<FbxMeshInfo>					_meshes;
 	vector<shared_ptr<FbxBoneInfo>>		_bones;
