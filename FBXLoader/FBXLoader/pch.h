@@ -66,3 +66,48 @@ struct Vertex {
 // Utils
 //string s2ws( string& s);
 //string ws2s( string& s);
+
+// Animation
+struct KeyFrameInfo
+{
+	double	time;
+	int32	frame;
+	Vec3	scale;
+	Vec4	rotation;
+	Vec3	translate;
+};
+
+struct Animator
+{
+	uint32			mSkeletonHandle;	// if Skeleton Enable use this Handle
+
+	wstring			animName;
+	int32			frameCount;
+	double			duration;
+	vector<vector<KeyFrameInfo>>	keyFrames;
+};
+
+
+
+
+// Skeleton
+struct Skeleton
+{
+	uint32 mStartOffset;
+	uint32 mEndOffset;
+	std::vector<BoneInfo> mBones;
+};
+
+struct SkeletonInfo
+{
+	uint32 StartOffset;
+	uint32 EndOffset;
+
+};
+
+struct BoneInfo
+{
+	wstring					boneName;
+	int32					parentIdx;
+	Matrix					matOffset;
+};
