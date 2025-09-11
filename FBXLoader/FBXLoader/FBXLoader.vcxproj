@@ -147,13 +147,11 @@
     </Link>
   </ItemDefinitionGroup>
   <ItemGroup>
-    <ClInclude Include="FBXExporter.h" />
     <ClInclude Include="FBXLoader.h" />
     <ClInclude Include="pch.h" />
     <ClInclude Include="SimpleMath.h" />
   </ItemGroup>
   <ItemGroup>
-    <ClCompile Include="FBXExporter.cpp" />
     <ClCompile Include="FBXLoader.cpp" />
     <ClCompile Include="main.cpp" />
     <ClCompile Include="pch.cpp">

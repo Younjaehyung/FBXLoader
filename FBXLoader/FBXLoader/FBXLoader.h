@@ -1,16 +1,88 @@
 ﻿#pragma once
 
 
+inline XMMATRIX FbxToXM(const FbxAMatrix& m)
+{
+	return XMMatrixSet(
+		(float)m.Get(0, 0), (float)m.Get(0, 1), (float)m.Get(0, 2), (float)m.Get(0, 3),
+		(float)m.Get(1, 0), (float)m.Get(1, 1), (float)m.Get(1, 2), (float)m.Get(1, 3),
+		(float)m.Get(2, 0), (float)m.Get(2, 1), (float)m.Get(2, 2), (float)m.Get(2, 3),
+		(float)m.Get(3, 0), (float)m.Get(3, 1), (float)m.Get(3, 2), (float)m.Get(3, 3));
+}
+
+inline XMFLOAT4X4 FbxToXMF4x4(const FbxAMatrix& m)
+{
+	XMFLOAT4X4 out;
+	out.m[0][0] = (float)m.Get(0, 0); out.m[0][1] = (float)m.Get(0, 1);
+	out.m[0][2] = (float)m.Get(0, 2); out.m[0][3] = (float)m.Get(0, 3);
+	out.m[1][0] = (float)m.Get(1, 0); out.m[1][1] = (float)m.Get(1, 1);
+	out.m[1][2] = (float)m.Get(1, 2); out.m[1][3] = (float)m.Get(1, 3);
+	out.m[2][0] = (float)m.Get(2, 0); out.m[2][1] = (float)m.Get(2, 1);
+	out.m[2][2] = (float)m.Get(2, 2); out.m[2][3] = (float)m.Get(2, 3);
+	out.m[3][0] = (float)m.Get(3, 0); out.m[3][1] = (float)m.Get(3, 1);
+	out.m[3][2] = (float)m.Get(3, 2); out.m[3][3] = (float)m.Get(3, 3);
+	return out;
+}
+
+
+static inline void PrintLine(std::ostream& os, char ch = '-', int width = 80) {
+	for (int i = 0; i < width; ++i) os << ch;
+	os << '\n';
+}
+
+
+// 숫자 출력 포맷(가독성용)
+static void SetNumFmt(std::ostream& os) {
+	os.setf(std::ios::fixed);
+	os << std::setprecision(6);
+}
+
+// XMFLOAT4X4 출력: 4x4 행렬 4줄
+static void WriteMats(std::ostream& os, const XMFLOAT4X4& m) {
+	SetNumFmt(os);
+	os << m.m[0][0] << ' ' << m.m[0][1] << ' ' << m.m[0][2] << ' ' << m.m[0][3] << '\n'
+		<< m.m[1][0] << ' ' << m.m[1][1] << ' ' << m.m[1][2] << ' ' << m.m[1][3] << '\n'
+		<< m.m[2][0] << ' ' << m.m[2][1] << ' ' << m.m[2][2] << ' ' << m.m[2][3] << '\n'
+		<< m.m[3][0] << ' ' << m.m[3][1] << ' ' << m.m[3][2] << ' ' << m.m[3][3] << '\n';
+}
+
+// FbxAMatrix도 바로 쓰고 싶으면 변환해서 출력
+static void WriteMats(std::ostream& os, const FbxAMatrix& m) {
+	WriteMats(os, FbxToXMF4x4(m));
+}
+/****************************
+*			FBX				*
+*****************************/
+struct MaterialValue {
+
+	Vec4 Diffuse{};
+	Vec4 Ambient{};
+	Vec4 Specular{};
+	Vec3 Emission{};
+
+	float Metallic{};
+	float Roughness{};
+	uint32 OcclusionMask{};
+	uint32 AlphaTest{};
+};
 
 struct FbxMaterialInfo
 {
-	Vec4			diffuse{};
-	Vec4			ambient{};
-	Vec4			specular{};
-	string			name{"UNKNOWN"};
-	string			diffuseTexName{};
-	string			normalTexName{};
-	string			specularTexName{};
+
+	MaterialValue MaterialValueInfo{};
+
+
+	string ShaderName{};
+	string DiffuseMap0Name{};
+	string DiffuseMap1Name{};
+	string DiffuseMap2Name{};
+	string DiffuseMap3Name{};
+
+	string NormalMapName{};
+	string SpecularcMapName{};
+	string EmissiveMapName{};
+	string MetallicMapName{};
+	string OcclusionMapName{};
 };
 
 struct BoneWeight
@@ -46,98 +118,227 @@ struct BoneWeight
 
 struct FbxMeshInfo
 {
-	string								name;
-	vector<Vertex>						vertices;
-	vector<vector<uint32>>				indices;
-	vector<FbxMaterialInfo>				materials;
-	vector<BoneWeight>					boneWeights; // �� ����ġ
+	string								Name;
+	vector<Vertex>						Vertices;
+	vector<vector<uint32>>				Indices;
+	vector<FbxMaterialInfo>				Materials;
+	vector<BoneWeight>					BoneWeights; // �� ����ġ
 	bool								hasAnimation;
 };
 
-struct FbxKeyFrameInfo
-{
-	FbxAMatrix  matTransform;
-	double		time;
-};
+
 
 struct FbxBoneInfo
 {
-	string					boneName;
-	int32					parentIndex;
-	FbxAMatrix				matOffset;
+	string					BoneName;
+	int32					ParentIndex;
+	FbxAMatrix				MatOffset;
+};
+
+
+struct FbxKeyFrameInfo
+{
+	FbxAMatrix  MatTransform;
+	double		Time;
 };
 
 struct FbxAnimClipInfo
 {
-	string			name;
-	FbxTime			startTime;
-	FbxTime			endTime;
-	FbxTime::EMode	mode;
-	vector<vector<FbxKeyFrameInfo>>	keyFrames;
+	string			Name;
+	FbxTime			StartTime;
+	FbxTime			EndTime;
+	FbxTime::EMode	Mode;
+	vector<vector<FbxKeyFrameInfo>>	KeyFrames;
 };
 
 
+/****************************
+*			Binary			*
+*****************************/
 
 
-// 바이너리 파일 헤더 정의 (버전 관리 및 검증용)
 struct BinaryFileHeader
 {
-	char signature[4] = { 'M', 'E', 'S', 'H' }; // 파일 식별자
-	uint32 version = 1;                       // 포맷 버전
-	uint32 meshCount = 0;                     // 메시 개수
-	uint32 boneCount = 0;                     // 본 개수
-	uint32 animClipCount = 0;                 // 애니메이션 클립 개수
-	uint32 reserved[3] = { 0, 0, 0 };          // 향후 확장용
+	uint32 MeshCount = 0;                     // 메시 개수
+	uint32 BoneCount = 0;                     // 본 개수
+	uint32 AnimClipCount = 0;                 // 애니메이션 클립 개수
+
 };
+
+struct  BinaryMaterialValue {
+
+	Vec4 Diffuse{};
+	Vec4 Ambient{};
+	Vec4 Specular{};
+	Vec3 Emission{};
+
+	float Metallic{};
+	float Roughness{};
+	uint32 OcclusionMask{};
+	uint32 AlphaTest{};
+};
+
+struct  BinaryMaterialInfo
+{
+
+	MaterialValue MaterialValueInfo{};
+
+
+	string ShaderName{};
+	string DiffuseMap0Name{};
+	string DiffuseMap1Name{};
+	string DiffuseMap2Name{};
+	string DiffuseMap3Name{};
+
+	string NormalMapName{};
+	string SpecularcMapName{};
+	string EmissiveMapName{};
+	string MetallicMapName{};
+	string OcclusionMapName{};
+};
+
 
 // 바이너리용 메시 정보 (최적화된 구조)
 struct BinaryMeshInfo
 {
-	uint32 nameLength;                        // 이름 길이
-	uint32 vertexCount;                      // 정점 개수
-	uint32 materialCount;                    // 머티리얼 개수
-	uint32 hasAnimation;                     // 애니메이션 여부 (bool을 uint32로)
-	uint32 reserved[4] = { 0, 0, 0, 0 };      // 향후 확장용
+	// uint32 NameLength;                        // 이름 길이 -> writeString
+	uint32 VertexCount;                      // 정점 개수
+	// index
+	uint32 MaterialCount;                    // 머티리얼 개수
+	uint32 HasAnimation;                     // 애니메이션 여부 (bool을 uint32로)
 };
 
-// 바이너리용 머티리얼 정보
-struct BinaryMaterialInfo
-{
-	Vec4 diffuse;
-	Vec4 ambient;
-	Vec4 specular;
-	uint32 nameLength;
-	uint32 diffuseTexNameLength;
-	uint32 normalTexNameLength;
-	uint32 specularTexNameLength;
-};
 
 // 바이너리용 본 정보
 struct BinaryBoneInfo
 {
-	uint32 nameLength;
-	int32 parentIndex;
-	FbxAMatrix matOffset;                    // 오프셋 매트릭스
-	uint32 reserved[2] = { 0, 0 };            // 향후 확장용
-};
-
-// 바이너리용 애니메이션 클립 정보
-struct BinaryAnimClipInfo
-{
-	uint32 nameLength;
-	double startTime;
-	double endTime;
-	uint32 timeMode;                         // FbxTime::EMode를 uint32로
-	uint32 totalKeyFrames;                   // 전체 키프레임 개수
-	uint32 reserved[3] = { 0, 0, 0 };         // 향후 확장용
+	// string	BoneName; -> WriteString
+	int32 ParentIndex;
+	XMFLOAT4X4 MatOffset;                    // 오프셋 매트릭스
 };
 
 // 바이너리용 키프레임 정보
 struct BinaryKeyFrameInfo
 {
-	FbxAMatrix matTransform;
-	double time;
+	XMFLOAT4X4 MatTransform;
+	double Time;
 };
+
+// 바이너리용 애니메이션 클립 정보
+struct BinaryAnimClipInfo
+{
+	// string	Name; -> WriteString
+	double StartTime;
+	double EndTime;
+	uint32 TimeMode;                         // FbxTime::EMode를 uint32로
+	//	BinaryKeyFrameInfo	KeyFrameInfo;-> vector<Vector>
+};
+
+
+
+
+//struct FbxMaterialInfo
+//{
+//	Vec4			diffuse{};
+//	Vec4			ambient{};
+//	Vec4			specular{};
+//	string			name{"UNKNOWN"};
+//	string			diffuseTexName{};
+//	string			normalTexName{};
+//	string			specularTexName{};
+//};
+
+/****************************
+*			Binary			*
+*****************************/
+
+
+struct YFileHeader
+{
+	uint32 MeshCount = 0;                     // 메시 개수
+	uint32 BoneCount = 0;                     // 본 개수
+	uint32 AnimClipCount = 0;                 // 애니메이션 클립 개수
+
+};
+
+struct  YMaterialValue {
+
+	Vec4 Diffuse{};
+	Vec4 Ambient{};
+	Vec4 Specular{};
+	Vec3 Emission{};
+
+	float Metallic{};
+	float Roughness{};
+	uint32 OcclusionMask{};
+	uint32 AlphaTest{};
+};
+
+struct  YMaterialInfo
+{
+
+	MaterialValue MaterialValueInfo{};
+
+
+	string ShaderName{};
+	string DiffuseMap0Name{};
+	string DiffuseMap1Name{};
+	string DiffuseMap2Name{};
+	string DiffuseMap3Name{};
+
+	string NormalMapName{};
+	string SpecularcMapName{};
+	string EmissiveMapName{};
+	string MetallicMapName{};
+	string OcclusionMapName{};
+};
+
+// 바이너리용 메시 정보 (최적화된 구조)
+struct YMeshInfo
+{
+	// uint32 NameLength;                        // 이름 길이 -> writeString
+	uint32 VertexCount;                      // 정점 개수
+	uint32 MaterialCount;                    // 머티리얼 개수
+	uint32 HasAnimation;                     // 애니메이션 여부 (bool을 uint32로)
+};
+
+struct YBMeshInfo
+{
+	string								Name;
+	vector<Vertex>						Vertices;
+	vector<vector<uint32>>				Indices;
+	vector<FbxMaterialInfo>				Materials;
+	vector<BoneWeight>					BoneWeights; // �� ����ġ
+	bool								hasAnimation;
+};
+
+
+// 바이너리용 본 정보
+struct YBoneInfo
+{
+	string	BoneName;
+	int32 ParentIndex;
+	XMFLOAT4X4 MatOffset;                    // 오프셋 매트릭스
+};
+
+
+// 바이너리용 키프레임 정보
+struct YKeyFrameInfo
+{
+	XMFLOAT4X4 MatTransform;
+	double Time;
+};
+
+// 바이너리용 애니메이션 클립 정보
+struct YAnimClipInfo
+{
+	string	Name;
+	double StartTime;
+	double EndTime;
+	uint32 TimeMode;                         // FbxTime::EMode를 uint32로
+	vector<vector<YKeyFrameInfo>>	KeyFrameInfo;
+};
+
 
 
 
@@ -146,30 +347,32 @@ class FBXLoader
 public:
 	FBXLoader();
 	~FBXLoader();
-
+	
 public:
 	void LoadFbx(const string& path);
-
 public:
-	int32 GetMeshCount() { return static_cast<int32>(_meshes.size()); }
-	const FbxMeshInfo& GetMesh(int32 idx) { return _meshes[idx]; }
-	vector<shared_ptr<FbxBoneInfo>>& GetBones() { return _bones; }
-	vector<shared_ptr<FbxAnimClipInfo>>& GetAnimClip() { return _animClips; }
+	int32 GetMeshCount() { return static_cast<int32>(mMeshes.size()); }
+	const FbxMeshInfo& GetMesh(int32 idx) { return mMeshes[idx]; }
+	vector<FbxBoneInfo>& GetBones() { return mBones; }
+	vector<FbxAnimClipInfo>& GetAnimClip() { return mAnimClips; }
 private:
 	void Import(const string& path);
-
 	void ParseNode(FbxNode* root);
-	void LoadMesh(FbxMesh* mesh);
-	void LoadMaterial(FbxSurfaceMaterial* surfaceMaterial);
-
+	
+private:
 	void		GetNormal(FbxMesh* mesh, FbxMeshInfo* container, int32 idx, int32 vertexCounter);
 	void		GetTangent(FbxMesh* mesh, FbxMeshInfo* container, int32 idx, int32 vertexCounter);
 	void		GetUV(FbxMesh* mesh, FbxMeshInfo* container, int32 idx, int32 vertexCounter);
 	Vec4		GetMaterialData(FbxSurfaceMaterial* surface, const char* materialName, const char* factorName);
 	string		GetTextureRelativeName(FbxSurfaceMaterial* surface, const char* materialProperty);
+	int32		FindBoneIndex(string name);
+	FbxAMatrix	GetTransform(FbxNode* node);
 
-	//void CreateTextures();
-	//void CreateMaterials();
+
+private:
+	// Mesh
+	void LoadMesh(FbxMesh* mesh);
+	void LoadMaterial(FbxSurfaceMaterial* surfaceMaterial);
 
 	// Animation
 	void LoadBones(FbxNode* node) { LoadBones(node, 0, -1); }
@@ -181,13 +384,12 @@ private:
 	void LoadOffsetMatrix(FbxCluster* cluster, const FbxAMatrix& matNodeTransform, int32 boneIdx, FbxMeshInfo* meshInfo);
 	void LoadKeyframe(int32 animIndex, FbxNode* node, FbxCluster* cluster, const FbxAMatrix& matNodeTransform, int32 boneIdx, FbxMeshInfo* container);
 
-	int32 FindBoneIndex(string name);
-	FbxAMatrix GetTransform(FbxNode* node);
+
 
 	void FillBoneWeight(FbxMesh* mesh, FbxMeshInfo* meshInfo);
 
 public:
-	// 추가: 바이너리 export 함수들
+	// 바이너리 export
 	bool ExportToBinary(const string& outputPath);
 
 private:
@@ -195,20 +397,69 @@ private:
 	void WriteString(std::ofstream& file, const string& str);
 	void WriteMeshData(std::ofstream& file, const FbxMeshInfo& meshInfo);
 	void WriteMaterialData(std::ofstream& file, const FbxMaterialInfo& materialInfo);
-	void WriteBoneData(std::ofstream& file, const shared_ptr<FbxBoneInfo>& boneInfo);
-	void WriteAnimClipData(std::ofstream& file, const shared_ptr<FbxAnimClipInfo>& animClipInfo);
+	void WriteBoneData(std::ofstream& file, const FbxBoneInfo& boneInfo);
+	void WriteAnimClipData(std::ofstream& file, const FbxAnimClipInfo& animClipInfo);
 
-	// 바이너리 import 함수들 (향후 게임에서 사용)
-	string ReadString(std::ifstream& file);
+public:
 	bool LoadFromBinary(const string& inputPath);
-private:
-	FbxManager*		_manager	= nullptr;
-	FbxScene*		_scene		= nullptr;
-	FbxImporter*	_importer	= nullptr;
-	string			_resourceDirectory;
 
-	vector<FbxMeshInfo>					_meshes;
-	vector<shared_ptr<FbxBoneInfo>>		_bones;
-	vector<shared_ptr<FbxAnimClipInfo>>	_animClips;
-	FbxArray<FbxString*>				_animNames;
+private:
+	FbxMaterialInfo ReadMaterialData_Impl(std::ifstream& file);
+	string ReadString(std::ifstream& file);
+
+public:
+	bool ExportToText(const std::string& outputPath);
+
+private:
+	void WriteMeshDataText(std::ofstream& file, const FbxMeshInfo& meshInfo);
+	void WriteMaterialDataText(std::ofstream& file, const FbxMaterialInfo& materialInfo, size_t idx);
+	void WriteBoneDataText(std::ofstream& file, const FbxBoneInfo& boneInfo, size_t idx);
+	void WriteAnimClipDataText(std::ofstream& file, const FbxAnimClipInfo& animClipInfo, size_t idx);
+
+
+public:
+	void	PrintBinaray();
+private:
+	string			mFileName{};
+
+	FbxManager*		mManager	= nullptr;
+	FbxScene*		mScene		= nullptr;
+	FbxImporter*	mImporter	= nullptr;
+	string			mResourceDirectory;
+private:
+	vector<FbxMeshInfo>					mMeshes; 
+	vector<FbxBoneInfo>					mBones;
+	vector<FbxAnimClipInfo>				mAnimClips;
+	FbxArray<FbxString*>				mAnimNames;
+private:
+	vector<YBMeshInfo>					mBMeshes;
+	vector<YBoneInfo>		mBBones;
+	vector<YAnimClipInfo>	mBAnimClips;
+	//FbxArray<FbxString*>				mAnimNames;
 };
+
+
+
+
+
+
+/*	FILE STRUCT
+
+	MESH
+		meshName
+		vertexCount
+		MaterialCount
+		HasAnimation
+
+		vertex
+		indices	[ count - index ]
+		material [value struct]
+				 [count - name]
+
+
+	MATERIAL
+
+	SKELETON
+
+	ANIMATION
+*/

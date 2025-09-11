@@ -40,43 +40,79 @@
 
 	
 int main() {
-	FBXLoader loader;
 
-	int argc = 1;
-	std::string in{/*argv[1]*/ };
-	std::string out{/*argv[2]*/};
 
-	if (in == "") {
-		std::cin >> in;
-	}
+		FBXLoader loader;
+
+
+		std::string in{};
+		int flag{};
+
+		std::cout << "Press 1 if you want to debug, Press 0 if you want to export files" << std::endl;
+		std::cin >> flag;
+		std::cout << "Please enter the file name" << std::endl;
+
+		if (in == "") {
+			std::cin >> in;
+		}
+
+		std::string out{ fs::path(in).parent_path().string() + "\\" + fs::path(in).filename().stem().string() + ".bin" };
+
+		if (flag == 1) {
+			std::cout << "Start debugging." << std::endl;
+			FBXLoader importer;
+			importer.LoadFromBinary(out);
+			//importer.PrintBinaray();
+			
+			return 1;
+		}
+
+		std::cout << "Start Export." << std::endl;
+
+
+		//if (argc < 1) {
+		//	printf("Usage: FbxToBin.exe <input.fbx> <output.bin>\n");
+		//	return 0;
+		//}
+		//else if (argc < 2) {
+		//	printf("ExportToBinary Data has been exported to .bin file. \n");
+		//	out = fs::path(in).parent_path().string() + "\\" + fs::path(in).filename().stem().string() + ".bin";
+		//}
+
+
+		//loader.LoadFbx("..\\Resources\\FBX\\Dragon.fbx");
+		loader.LoadFbx(in);
+
+		// export
+		//(loader.ExportToBinary("..\\Resources\\FBX\\Dragon.bin"))
+		if (loader.ExportToBinary(out))
+		{
+			std::wcout << L"Successfully exported to binary format!" << std::endl;
+			std::wcout << L"If you want to debug press 1." << std::endl;
+			std::wcout << L"If you want to complete press any key" << std::endl;
+			loader.ExportToText(out);
+			std::cin >> in;
+			if (flag == 1) {
+				std::cout << "Start debugging." << std::endl;
+				FBXLoader ximporter;
+				ximporter.LoadFromBinary(out);
+				
+				ximporter.PrintBinaray();
+				
+				return 1;
+			}
+
+
+			
+		}
+		else
+		{
+			// export ����
+			std::wcerr << L"Failed to export to binary format!" << std::endl;
+			return 0;
+		}
+
 	
-
-	if (argc < 1) {
-		printf("Usage: FbxToBin.exe <input.fbx> <output.bin>\n");
-		return 0;
-	}
-	else if (argc < 2) {
-		printf("ExportToBinary Data has been exported to .bin file. \n");
-		out = fs::path(in).parent_path().string() + "\\" + fs::path(in).filename().stem().string() + ".bin";
-	}
-	
-
-	//loader.LoadFbx("..\\Resources\\FBX\\Dragon.fbx");
-	loader.LoadFbx(in);
-
-	// ���̳ʸ� ���Ϸ� export
-	//if (loader.ExportToBinary("..\\Resources\\FBX\\Dragon.bin"))
-	if (loader.ExportToBinary(out))
-	{
-		// ���������� export��
-		std::wcout << L"Successfully exported to binary format!" << std::endl;
-	}
-	else
-	{
-		// export ����
-		std::wcerr << L"Failed to export to binary format!" << std::endl;
-	}
-
 
 	//ConvertOptions opt{};
 	//if (argc >= 4) opt.sampleRate = std::atof(argv[3]);

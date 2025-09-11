@@ -1,9 +1,18 @@
 ﻿#include "pch.h"
 #include "FBXLoader.h"
-//#include "Mesh.h"
-//#include "Resources.h"
-//#include "Shader.h"
-//#include "Material.h"
+
+
+std::string FBXLoader::ReadString(std::ifstream& file)
+{
+	uint32 len = 0;
+	file.read(reinterpret_cast<char*>(&len), sizeof(len));
+	std::string s;
+	s.resize(len);
+	if (len) file.read(s.data(), len);
+	return s;
+}
+
+
 
 FBXLoader::FBXLoader()
 {
@@ -12,10 +21,10 @@ FBXLoader::FBXLoader()
 
 FBXLoader::~FBXLoader()
 {
-	if (_scene)
-		_scene->Destroy();
-	if (_manager)
-		_manager->Destroy();
+	if (mScene)
+		mScene->Destroy();
+	if (mManager)
+		mManager->Destroy();
 }
 
 void FBXLoader::LoadFbx(const string& path)
@@ -24,52 +33,55 @@ void FBXLoader::LoadFbx(const string& path)
 	Import(path);
 
 	// Animation	
-	//LoadBones(_scene->GetRootNode());
-	//LoadAnimationInfo();
+	LoadBones(mScene->GetRootNode());
+	LoadAnimationInfo();
 
-	// �ε�� ������ �Ľ� (Mesh/Material/Skin)
-	ParseNode(_scene->GetRootNode());
+	// Mesh/Material/Skin
+	ParseNode(mScene->GetRootNode());
 
-	// �츮 ������ �°� Texture / Material ����
-	//CreateTextures();
-	//CreateMaterials();
 }
 
+/****************************
+*			Import			*
+*****************************/
 void FBXLoader::Import(const string& path)
 {
 	// FBX SDK ������ ��ü ����
-	_manager = FbxManager::Create();
+	mManager = FbxManager::Create();
 
 	// IOSettings ��ü ���� �� ����
-	FbxIOSettings* settings = FbxIOSettings::Create(_manager, IOSROOT);
-	_manager->SetIOSettings(settings);
+	FbxIOSettings* settings = FbxIOSettings::Create(mManager, IOSROOT);
+	mManager->SetIOSettings(settings);
 
 	// FbxImporter ��ü ����
-	_scene = FbxScene::Create(_manager, "");
+	mScene = FbxScene::Create(mManager, "");
 
 	// ���߿� Texture ��� ����� �� �� ��
-	_resourceDirectory = fs::path(path).parent_path().string() + "\\" + fs::path(path).filename().stem().string() + ".fbm";
+	mResourceDirectory = fs::path(path).parent_path().string() + "\\" + fs::path(path).filename().stem().string() + ".fbm";
+	
+	mFileName = fs::path(path).filename().stem().string();
 
-	_importer = FbxImporter::Create(_manager, "");
+	mImporter = FbxImporter::Create(mManager, "");
 
 	string strPath = path;
-	_importer->Initialize(strPath.c_str(), -1, _manager->GetIOSettings());
+	mImporter->Initialize(strPath.c_str(), -1, mManager->GetIOSettings());
 
-	_importer->Import(_scene);
+	mImporter->Import(mScene);
 
-	_scene->GetGlobalSettings().SetAxisSystem(FbxAxisSystem::DirectX);
+	mScene->GetGlobalSettings().SetAxisSystem(FbxAxisSystem::DirectX);
 
 	// �� ������ �ﰢ��ȭ �� �� �ִ� ��� ��带 �ﰢ��ȭ ��Ų��.
-	FbxGeometryConverter geometryConverter(_manager);
-	geometryConverter.Triangulate(_scene, true);
+	FbxGeometryConverter geometryConverter(mManager);
+	geometryConverter.Triangulate(mScene, true);
 
-	_importer->Destroy();
+	mImporter->Destroy();
 }
 
 void FBXLoader::ParseNode(FbxNode* node)
 {
 	FbxNodeAttribute* attribute = node->GetNodeAttribute();
 
+	// Mesh LOAD
 	if (attribute)
 	{
 		switch (attribute->GetAttributeType())
@@ -80,7 +92,7 @@ void FBXLoader::ParseNode(FbxNode* node)
 		}
 	}
 
-	// Material �ε�
+	// Material LOAD
 	const uint32 materialCount = node->GetMaterialCount();
 	for (uint32 i = 0; i < materialCount; ++i)
 	{
@@ -88,84 +100,16 @@ void FBXLoader::ParseNode(FbxNode* node)
 		LoadMaterial(surfaceMaterial);
 	}
 
-	// Tree ���� ��� ȣ��
+	// Tree SEARCH
 	const int32 childCount = node->GetChildCount();
 	for (int32 i = 0; i < childCount; ++i)
 		ParseNode(node->GetChild(i));
 }
 
-void FBXLoader::LoadMesh(FbxMesh* mesh)
-{
-	_meshes.push_back(FbxMeshInfo());
-	FbxMeshInfo& meshInfo = _meshes.back();
 
-	meshInfo.name = mesh->GetName();
-
-	const int32 vertexCount = mesh->GetControlPointsCount();
-	meshInfo.vertices.resize(vertexCount);
-	meshInfo.boneWeights.resize(vertexCount);
-
-	// Position
-	FbxVector4* controlPoints = mesh->GetControlPoints();
-	for (int32 i = 0; i < vertexCount; ++i)
-	{
-		meshInfo.vertices[i].pos.x = static_cast<float>(controlPoints[i].mData[0]);
-		meshInfo.vertices[i].pos.y = static_cast<float>(controlPoints[i].mData[2]);
-		meshInfo.vertices[i].pos.z = static_cast<float>(controlPoints[i].mData[1]);
-	}
-
-	const int32 materialCount = mesh->GetNode()->GetMaterialCount();
-	meshInfo.indices.resize(materialCount);
-
-	FbxGeometryElementMaterial* geometryElementMaterial = mesh->GetElementMaterial();
-
-	const int32 polygonSize = mesh->GetPolygonSize(0);
-	assert(polygonSize == 3);
-
-	uint32 arrIdx[3];
-	uint32 vertexCounter = 0; // ������ ����
-
-	const int32 triCount = mesh->GetPolygonCount(); // �޽��� �ﰢ�� ������ �����´�
-	for (int32 i = 0; i < triCount; i++) // �ﰢ���� ����
-	{
-		for (int32 j = 0; j < 3; j++) // �ﰢ���� �� ���� �������� ����
-		{
-			int32 controlPointIndex = mesh->GetPolygonVertex(i, j); // �������� �ε��� ����
-			arrIdx[j] = controlPointIndex;
-
-			GetNormal(mesh, &meshInfo, controlPointIndex, vertexCounter);
-			GetTangent(mesh, &meshInfo, controlPointIndex, vertexCounter);
-			GetUV(mesh, &meshInfo, controlPointIndex, mesh->GetTextureUVIndex(i, j));
-
-			vertexCounter++;
-		}
-
-		const uint32 subsetIdx = geometryElementMaterial->GetIndexArray().GetAt(i);
-		meshInfo.indices[subsetIdx].push_back(arrIdx[0]);
-		meshInfo.indices[subsetIdx].push_back(arrIdx[2]);
-		meshInfo.indices[subsetIdx].push_back(arrIdx[1]);
-	}
-
-	// Animation
-	LoadAnimationData(mesh, &meshInfo);
-}
-
-void FBXLoader::LoadMaterial(FbxSurfaceMaterial* surfaceMaterial)
-{
-	FbxMaterialInfo material{};
-
-	material.name = surfaceMaterial->GetName();
-
-	material.diffuse = GetMaterialData(surfaceMaterial, FbxSurfaceMaterial::sDiffuse, FbxSurfaceMaterial::sDiffuseFactor);
-	material.ambient = GetMaterialData(surfaceMaterial, FbxSurfaceMaterial::sAmbient, FbxSurfaceMaterial::sAmbientFactor);
-	material.specular = GetMaterialData(surfaceMaterial, FbxSurfaceMaterial::sSpecular, FbxSurfaceMaterial::sSpecularFactor);
-
-	material.diffuseTexName = GetTextureRelativeName(surfaceMaterial, FbxSurfaceMaterial::sDiffuse);
-	material.normalTexName = GetTextureRelativeName(surfaceMaterial, FbxSurfaceMaterial::sNormalMap);
-	material.specularTexName = GetTextureRelativeName(surfaceMaterial, FbxSurfaceMaterial::sSpecular);
-
-	_meshes.back().materials.push_back(material);
-}
+/****************************
+*			Getter			*
+*****************************/
 
 void FBXLoader::GetNormal(FbxMesh* mesh, FbxMeshInfo* container, int32 idx, int32 vertexCounter)
 {
@@ -191,9 +135,9 @@ void FBXLoader::GetNormal(FbxMesh* mesh, FbxMeshInfo* container, int32 idx, int3
 	}
 
 	FbxVector4 vec = normal->GetDirectArray().GetAt(normalIdx);
-	container->vertices[idx].normal.x = static_cast<float>(vec.mData[0]);
-	container->vertices[idx].normal.y = static_cast<float>(vec.mData[2]);
-	container->vertices[idx].normal.z = static_cast<float>(vec.mData[1]);
+	container->Vertices[idx].normal.x = static_cast<float>(vec.mData[0]);
+	container->Vertices[idx].normal.y = static_cast<float>(vec.mData[2]);
+	container->Vertices[idx].normal.z = static_cast<float>(vec.mData[1]);
 }
 
 void FBXLoader::GetTangent(FbxMesh* mesh, FbxMeshInfo* meshInfo, int32 idx, int32 vertexCounter)
@@ -201,9 +145,9 @@ void FBXLoader::GetTangent(FbxMesh* mesh, FbxMeshInfo* meshInfo, int32 idx, int3
 	if (mesh->GetElementTangentCount() == 0)
 	{
 		// TEMP : ������ �̷� ���� �˰�������� Tangent �������� ��
-		meshInfo->vertices[idx].tangent.x = 1.f;
-		meshInfo->vertices[idx].tangent.y = 0.f;
-		meshInfo->vertices[idx].tangent.z = 0.f;
+		meshInfo->Vertices[idx].tangent.x = 1.f;
+		meshInfo->Vertices[idx].tangent.y = 0.f;
+		meshInfo->Vertices[idx].tangent.z = 0.f;
 		return;
 	}
 
@@ -226,16 +170,16 @@ void FBXLoader::GetTangent(FbxMesh* mesh, FbxMeshInfo* meshInfo, int32 idx, int3
 	}
 
 	FbxVector4 vec = tangent->GetDirectArray().GetAt(tangentIdx);
-	meshInfo->vertices[idx].tangent.x = static_cast<float>(vec.mData[0]);
-	meshInfo->vertices[idx].tangent.y = static_cast<float>(vec.mData[2]);
-	meshInfo->vertices[idx].tangent.z = static_cast<float>(vec.mData[1]);
+	meshInfo->Vertices[idx].tangent.x = static_cast<float>(vec.mData[0]);
+	meshInfo->Vertices[idx].tangent.y = static_cast<float>(vec.mData[2]);
+	meshInfo->Vertices[idx].tangent.z = static_cast<float>(vec.mData[1]);
 }
 
 void FBXLoader::GetUV(FbxMesh* mesh, FbxMeshInfo* meshInfo, int32 idx, int32 uvIndex)
 {
 	FbxVector2 uv = mesh->GetElementUV()->GetDirectArray().GetAt(uvIndex);
-	meshInfo->vertices[idx].uv.x = static_cast<float>(uv.mData[0]);
-	meshInfo->vertices[idx].uv.y = 1.f - static_cast<float>(uv.mData[1]);
+	meshInfo->Vertices[idx].uv.x = static_cast<float>(uv.mData[0]);
+	meshInfo->Vertices[idx].uv.y = 1.f - static_cast<float>(uv.mData[1]);
 }
 
 Vec4 FBXLoader::GetMaterialData(FbxSurfaceMaterial* surface, const char* materialName, const char* factorName)
@@ -281,84 +225,109 @@ string FBXLoader::GetTextureRelativeName(FbxSurfaceMaterial* surface, const char
 	return name;
 }
 
-//void FBXLoader::CreateTextures()
-//{
-//	for (size_t i = 0; i < _meshes.size(); i++)
-//	{
-//		for (size_t j = 0; j < _meshes[i].materials.size(); j++)
-//		{
-//			// DiffuseTexture
-//			{
-//				string relativePath = _meshes[i].materials[j].diffuseTexName.c_str();
-//				string filename = fs::path(relativePath).filename();
-//				string fullPath = _resourceDirectory + L"\\" + filename;
-//				if (filename.empty() == false)
-//					GET_SINGLE(Resources)->Load<Texture>(filename, fullPath);
-//			}
-//
-//			// NormalTexture
-//			{
-//				string relativePath = _meshes[i].materials[j].normalTexName.c_str();
-//				string filename = fs::path(relativePath).filename();
-//				string fullPath = _resourceDirectory + L"\\" + filename;
-//				if (filename.empty() == false)
-//					GET_SINGLE(Resources)->Load<Texture>(filename, fullPath);
-//			}
-//
-//			// SpecularTexture
-//			{
-//				string relativePath = _meshes[i].materials[j].specularTexName.c_str();
-//				string filename = fs::path(relativePath).filename();
-//				string fullPath = _resourceDirectory + L"\\" + filename;
-//				if (filename.empty() == false)
-//					GET_SINGLE(Resources)->Load<Texture>(filename, fullPath);
-//			}
-//		}
-//	}
-//}
-//
-//void FBXLoader::CreateMaterials()
-//{
-//	for (size_t i = 0; i < _meshes.size(); i++)
-//	{
-//		for (size_t j = 0; j < _meshes[i].materials.size(); j++)
-//		{
-//			shared_ptr<Material> material = make_shared<Material>();
-//			string key = _meshes[i].materials[j].name;
-//			material->SetName(key);
-//			material->SetShader(GET_SINGLE(Resources)->Get<Shader>(L"Deferred"));
-//
-//			{
-//				string diffuseName = _meshes[i].materials[j].diffuseTexName.c_str();
-//				string filename = fs::path(diffuseName).filename();
-//				string key = filename;
-//				shared_ptr<Texture> diffuseTexture = GET_SINGLE(Resources)->Get<Texture>(key);
-//				if (diffuseTexture)
-//					material->SetTexture(0, diffuseTexture);
-//			}
-//
-//			{
-//				string normalName = _meshes[i].materials[j].normalTexName.c_str();
-//				string filename = fs::path(normalName).filename();
-//				string key = filename;
-//				shared_ptr<Texture> normalTexture = GET_SINGLE(Resources)->Get<Texture>(key);
-//				if (normalTexture)
-//					material->SetTexture(1, normalTexture);
-//			}
-//
-//			{
-//				string specularName = _meshes[i].materials[j].specularTexName.c_str();
-//				string filename = fs::path(specularName).filename();
-//				string key = filename;
-//				shared_ptr<Texture> specularTexture = GET_SINGLE(Resources)->Get<Texture>(key);
-//				if (specularTexture)
-//					material->SetTexture(2, specularTexture);
-//			}
-//
-//			GET_SINGLE(Resources)->Add<Material>(material->GetName(), material);
-//		}
-//	}
-//}
+FbxAMatrix FBXLoader::GetTransform(FbxNode* node)
+{
+	const FbxVector4 translation = node->GetGeometricTranslation(FbxNode::eSourcePivot);
+	const FbxVector4 rotation = node->GetGeometricRotation(FbxNode::eSourcePivot);
+	const FbxVector4 scaling = node->GetGeometricScaling(FbxNode::eSourcePivot);
+	return FbxAMatrix(translation, rotation, scaling);
+}
+
+
+
+int32 FBXLoader::FindBoneIndex(string name)
+{
+	string boneName = string(name.begin(), name.end());
+
+	for (UINT i = 0; i < mBones.size(); ++i)
+	{
+		if (mBones[i].BoneName == boneName)
+			return i;
+	}
+
+	return -1;
+}
+
+
+/****************************
+*			Loader			*
+*****************************/
+
+void FBXLoader::LoadMesh(FbxMesh* mesh)
+{
+	mMeshes.push_back(FbxMeshInfo());
+	FbxMeshInfo& meshInfo = mMeshes.back();
+
+	meshInfo.Name = mesh->GetName();
+
+	const int32 vertexCount = mesh->GetControlPointsCount();
+	meshInfo.Vertices.resize(vertexCount);
+	meshInfo.BoneWeights.resize(vertexCount);
+
+	// Position
+	FbxVector4* controlPoints = mesh->GetControlPoints();
+	for (int32 i = 0; i < vertexCount; ++i)
+	{
+		meshInfo.Vertices[i].pos.x = static_cast<float>(controlPoints[i].mData[0]);
+		meshInfo.Vertices[i].pos.y = static_cast<float>(controlPoints[i].mData[2]);
+		meshInfo.Vertices[i].pos.z = static_cast<float>(controlPoints[i].mData[1]);
+	}
+
+	const int32 materialCount = mesh->GetNode()->GetMaterialCount();
+	meshInfo.Indices.resize(materialCount);
+
+	FbxGeometryElementMaterial* geometryElementMaterial = mesh->GetElementMaterial();
+
+	const int32 polygonSize = mesh->GetPolygonSize(0);
+	assert(polygonSize == 3);
+
+	uint32 arrIdx[3];
+	uint32 vertexCounter = 0; // ������ ����
+
+	const int32 triCount = mesh->GetPolygonCount(); // �޽��� �ﰢ�� ������ �����´�
+	for (int32 i = 0; i < triCount; i++) // �ﰢ���� ����
+	{
+		for (int32 j = 0; j < 3; j++) // �ﰢ���� �� ���� �������� ����
+		{
+			int32 controlPointIndex = mesh->GetPolygonVertex(i, j); // �������� �ε��� ����
+			arrIdx[j] = controlPointIndex;
+
+			GetNormal(mesh, &meshInfo, controlPointIndex, vertexCounter);
+			GetTangent(mesh, &meshInfo, controlPointIndex, vertexCounter);
+			GetUV(mesh, &meshInfo, controlPointIndex, mesh->GetTextureUVIndex(i, j));
+
+			vertexCounter++;
+		}
+
+		const uint32 subsetIdx = geometryElementMaterial->GetIndexArray().GetAt(i);
+		meshInfo.Indices[subsetIdx].push_back(arrIdx[0]);
+		meshInfo.Indices[subsetIdx].push_back(arrIdx[2]);
+		meshInfo.Indices[subsetIdx].push_back(arrIdx[1]);
+	}
+
+	// Animation
+	LoadAnimationData(mesh, &meshInfo);
+}
+
+void FBXLoader::LoadMaterial(FbxSurfaceMaterial* surfaceMaterial)
+{
+	FbxMaterialInfo material{};
+	MaterialValue materialValue{};
+	materialValue.Diffuse = GetMaterialData(surfaceMaterial, FbxSurfaceMaterial::sDiffuse, FbxSurfaceMaterial::sDiffuseFactor);
+	materialValue.Ambient = GetMaterialData(surfaceMaterial, FbxSurfaceMaterial::sAmbient, FbxSurfaceMaterial::sAmbientFactor);
+	materialValue.Specular = GetMaterialData(surfaceMaterial, FbxSurfaceMaterial::sSpecular, FbxSurfaceMaterial::sSpecularFactor);
+
+	//material.name = surfaceMaterial->GetName();
+
+	material.MaterialValueInfo = materialValue;
+
+	material.DiffuseMap0Name = GetTextureRelativeName(surfaceMaterial, FbxSurfaceMaterial::sDiffuse);
+	material.NormalMapName = GetTextureRelativeName(surfaceMaterial, FbxSurfaceMaterial::sNormalMap);
+	material.SpecularcMapName = GetTextureRelativeName(surfaceMaterial, FbxSurfaceMaterial::sSpecular);
+
+	mMeshes.back().Materials.push_back(material);
+}
+
 
 void FBXLoader::LoadBones(FbxNode* node, int32 idx, int32 parentIdx)
 {
@@ -366,45 +335,45 @@ void FBXLoader::LoadBones(FbxNode* node, int32 idx, int32 parentIdx)
 
 	if (attribute && attribute->GetAttributeType() == FbxNodeAttribute::eSkeleton)
 	{
-		shared_ptr<FbxBoneInfo> bone = make_shared<FbxBoneInfo>();
-		bone->boneName = node->GetName();
-		bone->parentIndex = parentIdx;
-		_bones.push_back(bone);
+		FbxBoneInfo bone;
+		bone.BoneName = node->GetName();
+		bone.ParentIndex = parentIdx;
+		mBones.push_back(bone);
 	}
 
 	const int32 childCount = node->GetChildCount();
 	for (int32 i = 0; i < childCount; i++)
-		LoadBones(node->GetChild(i), static_cast<int32>(_bones.size()), idx);
+		LoadBones(node->GetChild(i), static_cast<int32>(mBones.size()), idx);
 }
 
 void FBXLoader::LoadAnimationInfo()
 {
-	_scene->FillAnimStackNameArray(OUT _animNames);
+	mScene->FillAnimStackNameArray(OUT mAnimNames);
 
-	const int32 animCount = _animNames.GetCount();
+	const int32 animCount = mAnimNames.GetCount();
 	for (int32 i = 0; i < animCount; i++)
 	{
-		FbxAnimStack* animStack = _scene->FindMember<FbxAnimStack>(_animNames[i]->Buffer());
+		FbxAnimStack* animStack = mScene->FindMember<FbxAnimStack>(mAnimNames[i]->Buffer());
 		if (animStack == nullptr)
 			continue;
 
-		shared_ptr<FbxAnimClipInfo> animClip = make_shared<FbxAnimClipInfo>();
-		animClip->name = animStack->GetName();
-		animClip->keyFrames.resize(_bones.size()); // Ű�������� ���� ������ŭ
+		FbxAnimClipInfo animClip;
+		animClip.Name = animStack->GetName();
+		animClip.KeyFrames.resize(mBones.size()); // 
 
-		FbxTakeInfo* takeInfo = _scene->GetTakeInfo(animStack->GetName());
-		animClip->startTime = takeInfo->mLocalTimeSpan.GetStart();
-		animClip->endTime = takeInfo->mLocalTimeSpan.GetStop();
-		animClip->mode = _scene->GetGlobalSettings().GetTimeMode();
+		FbxTakeInfo* takeInfo = mScene->GetTakeInfo(animStack->GetName());
+		animClip.StartTime = takeInfo->mLocalTimeSpan.GetStart();
+		animClip.EndTime = takeInfo->mLocalTimeSpan.GetStop();
+		animClip.Mode = mScene->GetGlobalSettings().GetTimeMode();
 
-		_animClips.push_back(animClip);
+		mAnimClips.push_back(animClip);
 	}
 }
 
 void FBXLoader::LoadAnimationData(FbxMesh* mesh, FbxMeshInfo* meshInfo)
 {
 	const int32 skinCount = mesh->GetDeformerCount(FbxDeformer::eSkin);
-	if (skinCount <= 0 || _animClips.empty())
+	if (skinCount <= 0 || mAnimClips.empty())
 		return;
 
 	meshInfo->hasAnimation = true;
@@ -431,10 +400,19 @@ void FBXLoader::LoadAnimationData(FbxMesh* mesh, FbxMeshInfo* meshInfo)
 					FbxAMatrix matNodeTransform = GetTransform(mesh->GetNode());
 					LoadBoneWeight(cluster, boneIdx, meshInfo);
 					LoadOffsetMatrix(cluster, matNodeTransform, boneIdx, meshInfo);
-
-					const int32 animCount = _animNames.Size();
+					
+					const int32 animCount = mAnimNames.Size();
+					std::cout << "OSW : " << animCount << endl;
+					// LoadAnimationData 내부, cluster 루프에서
 					for (int32 k = 0; k < animCount; k++)
+					{
+						// 이미 채워진 트랙이면 skip (중복 방지)
+						if (!mAnimClips[k].KeyFrames[boneIdx].empty())
+							continue;
+
 						LoadKeyframe(k, mesh->GetNode(), cluster, matNodeTransform, boneIdx, meshInfo);
+					}
+
 				}
 			}
 		}
@@ -446,10 +424,10 @@ void FBXLoader::LoadAnimationData(FbxMesh* mesh, FbxMeshInfo* meshInfo)
 
 void FBXLoader::FillBoneWeight(FbxMesh* mesh, FbxMeshInfo* meshInfo)
 {
-	const int32 size = static_cast<int32>(meshInfo->boneWeights.size());
+	const int32 size = static_cast<int32>(meshInfo->BoneWeights.size());
 	for (int32 v = 0; v < size; v++)
 	{
-		BoneWeight& boneWeight = meshInfo->boneWeights[v];
+		BoneWeight& boneWeight = meshInfo->BoneWeights[v];
 		boneWeight.Normalize();
 
 		float animBoneIndex[4] = {};
@@ -462,8 +440,8 @@ void FBXLoader::FillBoneWeight(FbxMesh* mesh, FbxMeshInfo* meshInfo)
 			animBoneWeight[w] = static_cast<float>(boneWeight.boneWeights[w].second);
 		}
 
-		memcpy(&meshInfo->vertices[v].indices, animBoneIndex, sizeof(Vec4));
-		memcpy(&meshInfo->vertices[v].weights, animBoneWeight, sizeof(Vec4));
+		memcpy(&meshInfo->Vertices[v].indices, animBoneIndex, sizeof(Vec4));
+		memcpy(&meshInfo->Vertices[v].weights, animBoneWeight, sizeof(Vec4));
 	}
 }
 
@@ -474,7 +452,7 @@ void FBXLoader::LoadBoneWeight(FbxCluster* cluster, int32 boneIdx, FbxMeshInfo* 
 	{
 		double weight = cluster->GetControlPointWeights()[i];
 		int32 vtxIdx = cluster->GetControlPointIndices()[i];
-		meshInfo->boneWeights[vtxIdx].AddWeights(boneIdx, weight);
+		meshInfo->BoneWeights[vtxIdx].AddWeights(boneIdx, weight);
 	}
 }
 
@@ -502,12 +480,12 @@ void FBXLoader::LoadOffsetMatrix(FbxCluster* cluster, const FbxAMatrix& matNodeT
 	matOffset = matClusterLinkTrans.Inverse() * matClusterTrans;
 	matOffset = matReflect * matOffset * matReflect;
 
-	_bones[boneIdx]->matOffset = matOffset.Transpose();
+	mBones[boneIdx].MatOffset = matOffset.Transpose();
 }
 
 void FBXLoader::LoadKeyframe(int32 animIndex, FbxNode* node, FbxCluster* cluster, const FbxAMatrix& matNodeTransform, int32 boneIdx, FbxMeshInfo* meshInfo)
 {
-	if (_animClips.empty())
+	if (mAnimClips.empty())
 		return;
 
 	FbxVector4	v1 = { 1, 0, 0, 0 };
@@ -520,14 +498,14 @@ void FBXLoader::LoadKeyframe(int32 animIndex, FbxNode* node, FbxCluster* cluster
 	matReflect.mData[2] = v3;
 	matReflect.mData[3] = v4;
 
-	FbxTime::EMode timeMode = _scene->GetGlobalSettings().GetTimeMode();
+	FbxTime::EMode timeMode = mScene->GetGlobalSettings().GetTimeMode();
 
 	// �ִϸ��̼� �����
-	FbxAnimStack* animStack = _scene->FindMember<FbxAnimStack>(_animNames[animIndex]->Buffer());
-	_scene->SetCurrentAnimationStack(OUT animStack);
+	FbxAnimStack* animStack = mScene->FindMember<FbxAnimStack>(mAnimNames[animIndex]->Buffer());
+	mScene->SetCurrentAnimationStack(OUT animStack);
 
-	FbxLongLong startFrame = _animClips[animIndex]->startTime.GetFrameCount(timeMode);
-	FbxLongLong endFrame = _animClips[animIndex]->endTime.GetFrameCount(timeMode);
+	FbxLongLong startFrame = mAnimClips[animIndex].StartTime.GetFrameCount(timeMode);
+	FbxLongLong endFrame = mAnimClips[animIndex].EndTime.GetFrameCount(timeMode);
 
 	for (FbxLongLong frame = startFrame; frame < endFrame; frame++)
 	{
@@ -540,81 +518,117 @@ void FBXLoader::LoadKeyframe(int32 animIndex, FbxNode* node, FbxCluster* cluster
 		FbxAMatrix matTransform = matFromNode.Inverse() * cluster->GetLink()->EvaluateGlobalTransform(fbxTime);
 		matTransform = matReflect * matTransform * matReflect;
 
-		keyFrameInfo.time = fbxTime.GetSecondDouble();
-		keyFrameInfo.matTransform = matTransform;
+		keyFrameInfo.Time = fbxTime.GetSecondDouble();
+		keyFrameInfo.MatTransform = matTransform;
 
-		_animClips[animIndex]->keyFrames[boneIdx].push_back(keyFrameInfo);
+		mAnimClips[animIndex].KeyFrames[boneIdx].push_back(keyFrameInfo);
 	}
 }
 
-int32 FBXLoader::FindBoneIndex(string name)
-{
-	string boneName = string(name.begin(), name.end());
 
-	for (UINT i = 0; i < _bones.size(); ++i)
-	{
-		if (_bones[i]->boneName == boneName)
-			return i;
-	}
 
-	return -1;
-}
-
-FbxAMatrix FBXLoader::GetTransform(FbxNode* node)
-{
-	const FbxVector4 translation = node->GetGeometricTranslation(FbxNode::eSourcePivot);
-	const FbxVector4 rotation = node->GetGeometricRotation(FbxNode::eSourcePivot);
-	const FbxVector4 scaling = node->GetGeometricScaling(FbxNode::eSourcePivot);
-	return FbxAMatrix(translation, rotation, scaling);
-}
-
-// FBXLoader.cpp에 추가할 구현
+/****************************
+*		ExportToBinary		*
+*****************************/
 bool FBXLoader::ExportToBinary(const string& outputPath)
 {
-	std::ofstream file(outputPath, std::ios::binary);
-	if (!file.is_open())
-	{
-		// 로그: 파일 열기 실패
-		return false;
-	}
-
 	try
 	{
-		// 1. 헤더 작성
-		BinaryFileHeader header;
-		header.meshCount = static_cast<uint32>(_meshes.size());
-		header.boneCount = static_cast<uint32>(_bones.size());
-		header.animClipCount = static_cast<uint32>(_animClips.size());
-
-		file.write(reinterpret_cast<const char*>(&header), sizeof(BinaryFileHeader));
-
-		// 2. 메시 데이터 작성
-		for (const auto& meshInfo : _meshes)
 		{
-			WriteMeshData(file, meshInfo);
+			std::string out{ fs::path(outputPath).parent_path().string() + "\\" + fs::path(outputPath).filename().stem().string() + ".mesh" };
+			std::ofstream file(out, std::ios::binary);
+			if (!file.is_open())
+			{
+				return 0;	// [error] false
+			}
+
+			// 0. Write BinaryFileHeader
+			BinaryFileHeader header;
+			header.MeshCount = static_cast<uint32>(mMeshes.size());
+			header.BoneCount = static_cast<uint32>(mBones.size());
+			header.AnimClipCount = static_cast<uint32>(mAnimClips.size());
+			file.write(reinterpret_cast<const char*>(&header), sizeof(BinaryFileHeader));
+
+			std::cout << "MeshCount : " << header.MeshCount << std::endl;
+			std::cout << "BoneCount : " << header.BoneCount << std::endl;
+			std::cout << "AnimClipCount : " << header.AnimClipCount << std::endl;
+
+			// 1. Write MeshData
+			for (const auto& meshInfo : mMeshes)
+			{
+				std::cout << "Mesh START" << std::endl;
+				WriteMeshData(file, meshInfo);
+				if (file) {
+					std::cout << "Mesh SUCCESS" << std::endl;
+				}
+				else {
+					std::cout << "Mesh FAIL" << std::endl;
+				}
+
+			}
+			file.close();
+		}
+		{
+
+			std::string out{ fs::path(outputPath).parent_path().string() + "\\" + fs::path(outputPath).filename().stem().string() + ".skel" };
+			std::ofstream file(out, std::ios::binary);
+			if (!file.is_open())
+			{
+				return 0;	// [error] false
+			}
+
+
+
+			// 2. Write BoneData
+			for (const auto& boneInfo : mBones)
+			{
+				std::cout << "Bone START" << std::endl;
+				WriteBoneData(file, boneInfo);
+				if (file) {
+					std::cout << "Bone SUCCESS" << std::endl;
+				}
+				else {
+					std::cout << "Bone FAIL" << std::endl;
+				}
+			}
+
+			file.close();
+		}
+		{
+			std::string out{ fs::path(outputPath).parent_path().string() + "\\" + fs::path(outputPath).filename().stem().string() + ".ani" };
+			std::ofstream file(out, std::ios::binary);
+			if (!file.is_open())
+			{
+				return 0;	// [error] false
+			}
+
+
+
+			// 3. Write AnimationData
+			for (const auto& animClipInfo : mAnimClips)
+			{
+				std::cout << "Animation START" << std::endl;
+				WriteAnimClipData(file, animClipInfo);
+				if (file) {
+					std::cout << "Animation SUCCESS" << std::endl;
+				}
+				else {
+					std::cout << "Animation FAIL" << std::endl;
+				}
+			}
+			file.close();
 		}
 
-		// 3. 본 데이터 작성
-		for (const auto& boneInfo : _bones)
-		{
-			WriteBoneData(file, boneInfo);
-		}
-
-		// 4. 애니메이션 클립 데이터 작성
-		for (const auto& animClipInfo : _animClips)
-		{
-			WriteAnimClipData(file, animClipInfo);
-		}
-
-		file.close();
+		
 		return true;
 	}
 	catch (const std::exception& e)
 	{
-		// 로그: 예외 발생
-		file.close();
+		
+		//file.close();
 		return false;
 	}
+	PrintBinaray();
 }
 
 void FBXLoader::WriteString(std::ofstream& file, const string& str)
@@ -633,27 +647,27 @@ void FBXLoader::WriteString(std::ofstream& file, const string& str)
 
 void FBXLoader::WriteMeshData(std::ofstream& file, const FbxMeshInfo& meshInfo)
 {
-	// 메시 헤더 정보 작성
+	// Write Mesh Name
+	WriteString(file, meshInfo.Name);
+
+	// Write Mesh Header
 	BinaryMeshInfo binaryMeshInfo;
-	binaryMeshInfo.nameLength = static_cast<uint32>(meshInfo.name.length());
-	binaryMeshInfo.vertexCount = static_cast<uint32>(meshInfo.vertices.size());
-	binaryMeshInfo.materialCount = static_cast<uint32>(meshInfo.materials.size());
-	binaryMeshInfo.hasAnimation = meshInfo.hasAnimation ? 1 : 0;
+	binaryMeshInfo.VertexCount = static_cast<uint32>(meshInfo.Vertices.size());
+	binaryMeshInfo.MaterialCount = static_cast<uint32>(meshInfo.Materials.size());
+	binaryMeshInfo.HasAnimation = meshInfo.hasAnimation ? 1 : 0;
 
 	file.write(reinterpret_cast<const char*>(&binaryMeshInfo), sizeof(BinaryMeshInfo));
 
-	// 메시 이름 작성
-	WriteString(file, meshInfo.name);
 
-	// 정점 데이터 작성
-	if (!meshInfo.vertices.empty())
+	// Write Mesh Vertex
+	if (!meshInfo.Vertices.empty())
 	{
-		file.write(reinterpret_cast<const char*>(meshInfo.vertices.data()),
-			meshInfo.vertices.size() * sizeof(Vertex));
+		file.write(reinterpret_cast<const char*>(meshInfo.Vertices.data()),
+			meshInfo.Vertices.size() * sizeof(Vertex));
 	}
 
-	// 인덱스 데이터 작성 (머티리얼별로)
-	for (const auto& indexArray : meshInfo.indices)
+	// Write Mesh Index (each Materials)
+	for (const auto& indexArray : meshInfo.Indices)
 	{
 		uint32 indexCount = static_cast<uint32>(indexArray.size());
 		file.write(reinterpret_cast<const char*>(&indexCount), sizeof(uint32));
@@ -665,21 +679,21 @@ void FBXLoader::WriteMeshData(std::ofstream& file, const FbxMeshInfo& meshInfo)
 		}
 	}
 
-	// 머티리얼 데이터 작성
-	for (const auto& materialInfo : meshInfo.materials)
+	// Write Materials Index
+	for (const auto& materialInfo : meshInfo.Materials)
 	{
 		WriteMaterialData(file, materialInfo);
 	}
 
-	// 본 웨이트 데이터 작성 (애니메이션이 있는 경우)
-	if (meshInfo.hasAnimation && !meshInfo.boneWeights.empty())
+	// Write BoneWeight Index (if Animation is exist)
+	if (meshInfo.hasAnimation && !meshInfo.BoneWeights.empty())
 	{
 		// 본 웨이트 개수 작성
-		uint32 boneWeightCount = static_cast<uint32>(meshInfo.boneWeights.size());
+		uint32 boneWeightCount = static_cast<uint32>(meshInfo.BoneWeights.size());
 		file.write(reinterpret_cast<const char*>(&boneWeightCount), sizeof(uint32));
 
 		// 각 정점의 본 웨이트 데이터 작성
-		for (const auto& boneWeight : meshInfo.boneWeights)
+		for (const auto& boneWeight : meshInfo.BoneWeights)
 		{
 			uint32 weightCount = static_cast<uint32>(boneWeight.boneWeights.size());
 			file.write(reinterpret_cast<const char*>(&weightCount), sizeof(uint32));
@@ -696,158 +710,572 @@ void FBXLoader::WriteMeshData(std::ofstream& file, const FbxMeshInfo& meshInfo)
 void FBXLoader::WriteMaterialData(std::ofstream& file, const FbxMaterialInfo& materialInfo)
 {
 	// 머티리얼 헤더 정보 작성
-	BinaryMaterialInfo binaryMaterialInfo;
-	binaryMaterialInfo.diffuse = materialInfo.diffuse;
-	binaryMaterialInfo.ambient = materialInfo.ambient;
-	binaryMaterialInfo.specular = materialInfo.specular;
-	binaryMaterialInfo.nameLength = static_cast<uint32>(materialInfo.name.length());
-	binaryMaterialInfo.diffuseTexNameLength = static_cast<uint32>((materialInfo.diffuseTexName).length());
-	binaryMaterialInfo.normalTexNameLength = static_cast<uint32>((materialInfo.normalTexName).length());
-	binaryMaterialInfo.specularTexNameLength = static_cast<uint32>((materialInfo.specularTexName).length());
-
-	file.write(reinterpret_cast<const char*>(&binaryMaterialInfo), sizeof(BinaryMaterialInfo));
+	MaterialValue binaryMaterialInfo;
+	binaryMaterialInfo.Diffuse = materialInfo.MaterialValueInfo.Diffuse;
+	binaryMaterialInfo.Ambient = materialInfo.MaterialValueInfo.Ambient;
+	binaryMaterialInfo.Specular = materialInfo.MaterialValueInfo.Specular;
+	binaryMaterialInfo.Emission = materialInfo.MaterialValueInfo.Emission;
+	binaryMaterialInfo.Metallic = materialInfo.MaterialValueInfo.Metallic;
+	binaryMaterialInfo.Roughness = materialInfo.MaterialValueInfo.Roughness;
+	binaryMaterialInfo.OcclusionMask = materialInfo.MaterialValueInfo.OcclusionMask;
+	binaryMaterialInfo.AlphaTest = materialInfo.MaterialValueInfo.AlphaTest;
+	file.write(reinterpret_cast<const char*>(&binaryMaterialInfo), sizeof(MaterialValue));
 
 	// 문자열들 작성
-	WriteString(file, materialInfo.name);
-	WriteString(file, materialInfo.diffuseTexName);
-	WriteString(file, materialInfo.normalTexName);
-	WriteString(file, materialInfo.specularTexName);
+	WriteString(file, materialInfo.ShaderName);
+
+	WriteString(file, materialInfo.DiffuseMap0Name);
+	WriteString(file, materialInfo.DiffuseMap1Name);
+	WriteString(file, materialInfo.DiffuseMap2Name);
+	WriteString(file, materialInfo.DiffuseMap3Name);
+
+	WriteString(file, materialInfo.NormalMapName);
+	WriteString(file, materialInfo.SpecularcMapName);
+	WriteString(file, materialInfo.EmissiveMapName);
+	WriteString(file, materialInfo.MetallicMapName);
+	WriteString(file, materialInfo.OcclusionMapName);
 }
 
-void FBXLoader::WriteBoneData(std::ofstream& file, const shared_ptr<FbxBoneInfo>& boneInfo)
+void FBXLoader::WriteBoneData(std::ofstream& file, const FbxBoneInfo& boneInfo)
 {
-	// 본 헤더 정보 작성
+	// 본 이름 작성
+	WriteString(file, boneInfo.BoneName);
+
 	BinaryBoneInfo binaryBoneInfo;
-	binaryBoneInfo.nameLength = static_cast<uint32>(boneInfo->boneName.length());
-	binaryBoneInfo.parentIndex = boneInfo->parentIndex;
-	binaryBoneInfo.matOffset = boneInfo->matOffset;
+	binaryBoneInfo.ParentIndex = boneInfo.ParentIndex;
+	binaryBoneInfo.MatOffset = FbxToXMF4x4(boneInfo.MatOffset);
 
 	file.write(reinterpret_cast<const char*>(&binaryBoneInfo), sizeof(BinaryBoneInfo));
-
-	// 본 이름 작성
-	WriteString(file, boneInfo->boneName);
 }
 
-void FBXLoader::WriteAnimClipData(std::ofstream& file, const shared_ptr<FbxAnimClipInfo>& animClipInfo)
+void FBXLoader::WriteAnimClipData(std::ofstream& file, const FbxAnimClipInfo& animClipInfo)
 {
-	// 애니메이션 클립 헤더 정보 작성
-	BinaryAnimClipInfo binaryAnimClipInfo;
-	binaryAnimClipInfo.nameLength = static_cast<uint32>(animClipInfo->name.length());
-	binaryAnimClipInfo.startTime = animClipInfo->startTime.GetSecondDouble();
-	binaryAnimClipInfo.endTime = animClipInfo->endTime.GetSecondDouble();
-	binaryAnimClipInfo.timeMode = static_cast<uint32>(animClipInfo->mode);
-
-	// 전체 키프레임 개수 계산
-	uint32 totalKeyFrames = 0;
-	for (const auto& boneKeyFrames : animClipInfo->keyFrames)
-	{
-		totalKeyFrames += static_cast<uint32>(boneKeyFrames.size());
-	}
-	binaryAnimClipInfo.totalKeyFrames = totalKeyFrames;
-
-	file.write(reinterpret_cast<const char*>(&binaryAnimClipInfo), sizeof(BinaryAnimClipInfo));
 
 	// 애니메이션 클립 이름 작성
-	WriteString(file, animClipInfo->name);
+	WriteString(file, animClipInfo.Name);
 
+	BinaryAnimClipInfo dummy{};
+	dummy.StartTime = (double)(animClipInfo.StartTime.GetSecondDouble());
+	dummy.EndTime = (double)(animClipInfo.EndTime.GetSecondDouble());
+	dummy.TimeMode = animClipInfo.Mode;
+	file.write(reinterpret_cast<const char*>(&dummy), sizeof(dummy));
+
+	
+
+	int i = 0;
+	
 	// 본별 키프레임 데이터 작성
-	uint32 boneCount = static_cast<uint32>(animClipInfo->keyFrames.size());
+	uint32 boneCount = static_cast<uint32>(animClipInfo.KeyFrames.size());
 	file.write(reinterpret_cast<const char*>(&boneCount), sizeof(uint32));
 
-	for (const auto& boneKeyFrames : animClipInfo->keyFrames)
+	for (const auto& boneKeyFrames : animClipInfo.KeyFrames)
 	{
 		uint32 keyFrameCount = static_cast<uint32>(boneKeyFrames.size());
+		std::cout <<" KeyFrames : "<< ++i<<"  : " << (boneKeyFrames.size()) << endl;
 		file.write(reinterpret_cast<const char*>(&keyFrameCount), sizeof(uint32));
 
 		for (const auto& keyFrame : boneKeyFrames)
 		{
 			BinaryKeyFrameInfo binaryKeyFrame;
-			binaryKeyFrame.matTransform = keyFrame.matTransform;
-			binaryKeyFrame.time = keyFrame.time;
-
+			binaryKeyFrame.MatTransform = FbxToXMF4x4( keyFrame.MatTransform);
+			binaryKeyFrame.Time = keyFrame.Time;
 			file.write(reinterpret_cast<const char*>(&binaryKeyFrame), sizeof(BinaryKeyFrameInfo));
+			
 		}
 	}
+	std::cout << i<< endl;
 }
 
 
 
-// 게임 런타임에서 바이너리 파일을 빠르게 로드하는 함수 (참고용)
-string FBXLoader::ReadString(std::ifstream& file)
+/****************************
+*		ImportToBinary		*
+*****************************/
+
+// === 읽기 함수들 ===
+
+
+
+// MaterialValue/FbxMaterialInfo 모양은 네 프로젝트의 선언을 그대로 따른다고 가정
+// (WriteMaterialData에서 쓴 순서와 1:1로 읽음)
+FbxMaterialInfo FBXLoader::ReadMaterialData_Impl(std::ifstream& file)
 {
-	uint32 length;
-	file.read(reinterpret_cast<char*>(&length), sizeof(uint32));
+	FbxMaterialInfo m{};
+	MaterialValue mv{};
+	file.read(reinterpret_cast<char*>(&mv), sizeof(mv));
+	m.MaterialValueInfo = mv;
 
-	if (length == 0)
-		return "";
+	m.ShaderName = ReadString(file);
 
-	string utf8Str(length, '\0');
-	file.read(&utf8Str[0], length);
+	m.DiffuseMap0Name = ReadString(file);
+	m.DiffuseMap1Name = ReadString(file);
+	m.DiffuseMap2Name = ReadString(file);
+	m.DiffuseMap3Name = ReadString(file);
 
-	return utf8Str; // 기존의 s2ws 함수 사용
+	m.NormalMapName = ReadString(file);
+	m.SpecularcMapName = ReadString(file);
+	m.EmissiveMapName = ReadString(file);
+	m.MetallicMapName = ReadString(file);
+	m.OcclusionMapName = ReadString(file);
+
+	return m;
 }
-
-bool FBXLoader::LoadFromBinary(const string& inputPath)
+bool FBXLoader::LoadFromBinary(const std::string& anyOfThreePaths)
 {
-	std::ifstream file(inputPath, std::ios::binary);
-	if (!file.is_open())
-		return false;
+	try {
+		// 초기화
+		mMeshes.clear();
+		mBones.clear();
+		mAnimClips.clear();
 
-	try
-	{
-		// 헤더 읽기
-		BinaryFileHeader header;
-		file.read(reinterpret_cast<char*>(&header), sizeof(BinaryFileHeader));
+		// 베이스 경로/이름 계산
+		const auto baseDir = fs::path(anyOfThreePaths).parent_path().string();
+		const auto baseName = fs::path(anyOfThreePaths).filename().stem().string();
+		const std::string meshPath = baseDir + "\\" + baseName + ".mesh";
+		const std::string skelPath = baseDir + "\\" + baseName + ".skel";
+		const std::string aniPath = baseDir + "\\" + baseName + ".ani";
 
-		// 시그니처 확인
-		if (strncmp(header.signature, "MESH", 4) != 0)
+		BinaryFileHeader header{};
+
+		// === 1) .mesh ===
 		{
-			file.close();
-			return false; // 잘못된 파일 포맷
+			std::ifstream f(meshPath, std::ios::binary);
+			if (!f.is_open()) return false;
+			std::cout << "Debugging Mesh" << std::endl;
+			// Header
+			f.read(reinterpret_cast<char*>(&header), sizeof(header));
+
+			// Meshes
+			mMeshes.reserve(header.MeshCount);
+
+			for (uint32 mi = 0; mi < header.MeshCount; ++mi)
+			{
+				ReadString(f);
+
+				YMeshInfo bmi{};
+				f.read(reinterpret_cast<char*>(&bmi), sizeof(bmi));
+
+				YBMeshInfo m;
+				// Vertices
+				static_assert(std::is_trivially_copyable_v<Vertex>,
+					"Vertex must be trivially copyable");
+				m.Vertices.resize(bmi.VertexCount);
+				if (bmi.VertexCount)
+					f.read(reinterpret_cast<char*>(m.Vertices.data()),
+						sizeof(Vertex) * bmi.VertexCount);
+
+				// Indices (by material)
+				m.Indices.resize(bmi.MaterialCount);
+				for (uint32 s = 0; s < bmi.MaterialCount; ++s)
+				{
+					uint32 ic = 0;
+					f.read(reinterpret_cast<char*>(&ic), sizeof(ic));
+					m.Indices[s].resize(ic);
+					if (ic)
+						f.read(reinterpret_cast<char*>(m.Indices[s].data()),
+							sizeof(uint32) * ic);
+				}
+
+				// Materials
+				m.Materials.resize(bmi.MaterialCount);
+				for (uint32 s = 0; s < bmi.MaterialCount; ++s)
+					m.Materials[s] = ReadMaterialData_Impl(f);
+
+				// BoneWeights (optional)
+				m.hasAnimation = (bmi.HasAnimation != 0);
+				if (m.hasAnimation)
+				{
+					uint32 bwCount = 0;
+					f.read(reinterpret_cast<char*>(&bwCount), sizeof(bwCount));
+					m.BoneWeights.resize(bwCount);
+
+					for (uint32 v = 0; v < bwCount; ++v)
+					{
+						uint32 weightCount = 0;
+						f.read(reinterpret_cast<char*>(&weightCount), sizeof(weightCount));
+
+						auto& bw = m.BoneWeights[v].boneWeights;
+						bw.clear();
+						bw.reserve(weightCount);
+
+						for (uint32 k = 0; k < weightCount; ++k)
+						{
+							int32 idx; double wt;
+							f.read(reinterpret_cast<char*>(&idx), sizeof(idx));
+							f.read(reinterpret_cast<char*>(&wt), sizeof(wt));
+							bw.emplace_back(idx, wt);
+						}
+					}
+				}
+
+				mBMeshes.emplace_back(m);
+			}
+			f.close();
 		}
 
-		// 버전 확인
-		if (header.version != 1)
+		// === 2) .skel ===
 		{
-			file.close();
-			return false; // 지원하지 않는 버전
+			std::ifstream f(skelPath, std::ios::binary);
+			std::cout << "Debugging Skel" << std::endl;
+			if (f.is_open())
+			{
+				mBones.reserve(header.BoneCount);
+				for (uint32 bi = 0; bi < header.BoneCount; ++bi)
+				{
+					YBoneInfo b;
+					BinaryBoneInfo bb{};
+					b.BoneName = ReadString(f);
+					
+					f.read(reinterpret_cast<char*>(&bb), sizeof(bb));
+					b.ParentIndex = bb.ParentIndex;
+					b.MatOffset = bb.MatOffset; // XMFLOAT4X4 그대로
+
+					mBBones.emplace_back(b);
+				}
+			}
+			// 정적 메시면 스킵
+			f.close();
 		}
 
-		// 데이터 초기화
-		_meshes.clear();
-		_bones.clear();
-		_animClips.clear();
-
-		_meshes.reserve(header.meshCount);
-		_bones.reserve(header.boneCount);
-		_animClips.reserve(header.animClipCount);
-
-		// 메시 데이터 읽기
-		for (uint32 i = 0; i < header.meshCount; ++i)
+		// === 3) .ani ===
 		{
-			
-			// 메시 로딩 구현 (역순으로 읽기)
-			// 실제 구현은 WriteMeshData의 역순으로 진행
+			std::ifstream f(aniPath, std::ios::binary);
+			std::cout << "Debugging Ani" << std::endl;
+			if (f.is_open())
+			{
+				mAnimClips.reserve(header.AnimClipCount);
+
+				for (uint32 ai = 0; ai < header.AnimClipCount; ++ai)
+				{
+					YAnimClipInfo yclip{};
+					BinaryAnimClipInfo clip{};
+
+
+					
+					yclip.Name = ReadString(f);
+					f.read(reinterpret_cast<char*>(&clip), sizeof(clip));
+					yclip.StartTime = clip.StartTime;
+					yclip.EndTime = clip.EndTime;
+					yclip.TimeMode = clip.TimeMode;
+
+					// boneTracks
+					uint32 boneTracks = 0;
+					f.read(reinterpret_cast<char*>(&boneTracks), sizeof(boneTracks));
+					yclip.KeyFrameInfo.resize(boneTracks);
+
+					// 각 본 트랙
+					for (uint32 b = 0; b < boneTracks; ++b)
+					{
+						uint32 kcount = 0;
+						f.read(reinterpret_cast<char*>(&kcount), sizeof(kcount));
+						auto& track = yclip.KeyFrameInfo[b];
+						track.resize(kcount);
+
+						for (uint32 k = 0; k < kcount; ++k)
+						{
+							BinaryKeyFrameInfo binKF{};
+							f.read(reinterpret_cast<char*>(&binKF), sizeof(binKF));
+
+							YKeyFrameInfo kf{};
+							kf.MatTransform = binKF.MatTransform; // XMFLOAT4X4 그대로
+							kf.Time = binKF.Time;
+							track[k] = kf;
+						}
+					}
+
+					mBAnimClips.emplace_back(yclip);
+				}
+			}
+			f.close();
+			// 애니 없음이면 스킵
 		}
 
-		// 본 데이터 읽기
-		for (uint32 i = 0; i < header.boneCount; ++i)
-		{
-			// 본 로딩 구현
-		}
-
-		// 애니메이션 클립 데이터 읽기
-		for (uint32 i = 0; i < header.animClipCount; ++i)
-		{
-			// 애니메이션 클립 로딩 구현
-		}
-
-		file.close();
 		return true;
 	}
-	catch (const std::exception& e)
-	{
-		file.close();
+	catch (...) {
 		return false;
+	}
+}
+
+
+
+void FBXLoader::PrintBinaray()
+{
+
+	for (auto& m : mBMeshes) {
+		cout << m.Name << '\n';
+		int i = 0;
+		cout << " =======Vertex====== " << '\n';
+		for (auto& v : m.Vertices) {
+			cout << " =======vertex "<< ++i <<":====== " << '\n';
+			cout << v.pos.x<<",";
+			cout << v.pos.y << ",";
+			cout << v.pos.z;
+			cout << " | ";
+			cout << v.uv.x << ",";
+			cout << v.uv.y;
+			cout << " | ";
+			cout << v.normal.x << ",";
+			cout << v.normal.y << ",";
+			cout << v.normal.z;
+			cout << " | ";
+			cout << v.tangent.x << ",";
+			cout << v.tangent.y << ",";
+			cout << v.tangent.z;
+			cout << " | ";
+			cout << v.weights.x << ",";
+			cout << v.weights.y << ",";
+			cout << v.weights.z << ",";
+			cout << v.weights.w;
+			cout << " | ";
+			cout << v.indices.x << ",";
+			cout << v.indices.y << ",";
+			cout << v.indices.z << ",";
+			cout << v.indices.w;
+			cout << endl;
+		}
+
+		cout << " =======Index====== " << '\n';
+		i = 0;
+		for (auto& i1 : m.Indices) {
+			cout << " =======Index " << ++i << ":====== " << '\n';
+			int j = 0;
+			for (auto& i2 : i1) {
+				cout << i2 << ",";
+				++j;
+				if (j % 3 == 0) {
+					cout << '\n';
+				}
+			}
+		}
+		for (auto& v : m.Materials) {
+
+		}
+		for (auto& v : m.BoneWeights) {
+
+		}
+		
+
+
+		// BoneWeights (optional)
+		//m.hasAnimation = (bmi.HasAnimation != 0);
+		//if (m.hasAnimation)
+		//{
+		//	uint32 bwCount = 0;
+		//	f.read(reinterpret_cast<char*>(&bwCount), sizeof(bwCount));
+		//	m.BoneWeights.resize(bwCount);
+
+		//	for (uint32 v = 0; v < bwCount; ++v)
+		//	{
+		//		uint32 weightCount = 0;
+		//		f.read(reinterpret_cast<char*>(&weightCount), sizeof(weightCount));
+
+		//		auto& bw = m.BoneWeights[v].boneWeights;
+		//		bw.clear();
+		//		bw.reserve(weightCount);
+
+		//		for (uint32 k = 0; k < weightCount; ++k)
+		//		{
+		//			int32 idx; double wt;
+		//			f.read(reinterpret_cast<char*>(&idx), sizeof(idx));
+		//			f.read(reinterpret_cast<char*>(&wt), sizeof(wt));
+		//			bw.emplace_back(idx, wt);
+		//		}
+		//	}
+		//}
+
+	}
+	for (auto& b : mBBones) {
+		cout << " =======Index====== " << '\n';
+		std::cout << b.BoneName<< " : ";
+		std::cout << b.ParentIndex << " : ";
+		std::cout << b.MatOffset._11 << '\n';
+		cout << " =======Index====== " << '\n';
+	}
+	for (auto& a : mBAnimClips) {
+
+	}
+
+
+}
+
+
+
+
+
+bool FBXLoader::ExportToText(const std::string& outputPath)
+{
+	try {
+		// 공통 헤더(카운트) 정보는 .mesh 텍스트 파일 맨 처음에만 씀
+		{
+			std::string out = fs::path(outputPath).parent_path().string() + "\\" +
+				fs::path(outputPath).filename().stem().string() + ".mesh.txt";
+			std::ofstream file(out);
+			if (!file.is_open()) return false;
+
+			file << "# HEADER\n";
+			file << "MeshCount " << mMeshes.size() << '\n';
+			file << "BoneCount " << mBones.size() << '\n';
+			file << "AnimClipCount " << mAnimClips.size() << '\n\n';
+
+			// Meshes
+			for (size_t i = 0; i < mMeshes.size(); ++i) {
+				file << "===== MESH " << i << " =====\n";
+				WriteMeshDataText(file, mMeshes[i]);
+				file << '\n';
+			}
+		}
+
+		// Skeleton
+		{
+			std::string out = fs::path(outputPath).parent_path().string() + "\\" +
+				fs::path(outputPath).filename().stem().string() + ".skel.txt";
+			std::ofstream file(out);
+			if (!file.is_open()) return false;
+
+			file << "# SKELETON\n";
+			file << "BoneCount " << mBones.size() << "\n\n";
+
+			for (size_t i = 0; i < mBones.size(); ++i) {
+				WriteBoneDataText(file, mBones[i], i);
+				file << '\n';
+			}
+		}
+
+		// Animations
+		{
+			std::string out = fs::path(outputPath).parent_path().string() + "\\" +
+				fs::path(outputPath).filename().stem().string() + ".ani.txt";
+			std::ofstream file(out);
+			if (!file.is_open()) return false;
+
+			file << "# ANIMATIONS\n";
+			file << "ClipCount " << mAnimClips.size() << "\n\n";
+
+			for (size_t i = 0; i < mAnimClips.size(); ++i) {
+				WriteAnimClipDataText(file, mAnimClips[i], i);
+				file << '\n';
+			}
+		}
+
+		return true;
+	}
+	catch (...) {
+		return false;
+	}
+}
+
+void FBXLoader::WriteMeshDataText(std::ofstream& file, const FbxMeshInfo& meshInfo)
+{
+	file << "Name \"" << meshInfo.Name << "\"\n";
+
+	// 바이너리에서 BinaryMeshInfo와 동일 정보
+	file << "VertexCount " << meshInfo.Vertices.size() << '\n';
+	file << "MaterialCount " << meshInfo.Materials.size() << '\n';
+	file << "HasAnimation " << (meshInfo.hasAnimation ? 1 : 0) << '\n';
+
+	// Vertex dump
+	file << "\n[Vertices]\n";
+	SetNumFmt(file);
+	for (size_t i = 0; i < meshInfo.Vertices.size(); ++i) {
+		const auto& v = meshInfo.Vertices[i];
+		file << "v " << i << "  pos("
+			<< v.pos.x << ' ' << v.pos.y << ' ' << v.pos.z << ")  uv("
+			<< v.uv.x << ' ' << v.uv.y << ")  n("
+			<< v.normal.x << ' ' << v.normal.y << ' ' << v.normal.z << ")  t("
+			<< v.tangent.x << ' ' << v.tangent.y << ' ' << v.tangent.z << ")  idx("
+			<< v.indices.x << ' ' << v.indices.y << ' ' << v.indices.z << ' ' << v.indices.w << ")  w("
+			<< v.weights.x << ' ' << v.weights.y << ' ' << v.weights.z << ' ' << v.weights.w << ")\n";
+	}
+
+	// Indices (by material subset)
+	file << "\n[Indices]\n";
+	for (size_t s = 0; s < meshInfo.Indices.size(); ++s) {
+		const auto& arr = meshInfo.Indices[s];
+		file << "Subset " << s << "  IndexCount " << arr.size() << "\n";
+		// 보기 좋게 12개씩 줄바꿈
+		size_t col = 0;
+		for (auto idx : arr) {
+			file << idx << ' ';
+			if (++col >= 12) { file << '\n'; col = 0; }
+		}
+		if (col) file << '\n';
+	}
+
+	// Materials
+	file << "\n[Materials]\n";
+	for (size_t mi = 0; mi < meshInfo.Materials.size(); ++mi) {
+		WriteMaterialDataText(file, meshInfo.Materials[mi], mi);
+		file << '\n';
+	}
+
+	// BoneWeights (바이너리 파일에 썼던 구조 그대로 텍스트로)
+	if (meshInfo.hasAnimation && !meshInfo.BoneWeights.empty()) {
+		file << "\n[BoneWeights]\n";
+		file << "BoneWeightCount " << meshInfo.BoneWeights.size() << '\n';
+		for (size_t v = 0; v < meshInfo.BoneWeights.size(); ++v) {
+			const auto& bw = meshInfo.BoneWeights[v].boneWeights;
+			file << "vtx " << v << "  weightCount " << bw.size() << "  : ";
+			for (auto& p : bw) {
+				file << "(" << p.first << ',' << p.second << ") ";
+			}
+			file << '\n';
+		}
+	}
+}
+
+void FBXLoader::WriteMaterialDataText(std::ofstream& file, const FbxMaterialInfo& m, size_t idx)
+{
+	const auto& v = m.MaterialValueInfo;
+	file << "Material " << idx << '\n';
+	SetNumFmt(file);
+	file << "  Values  Diffuse(" << v.Diffuse.x << ' ' << v.Diffuse.y << ' ' << v.Diffuse.z << ' ' << v.Diffuse.w << ")\n";
+	file << "          Ambient(" << v.Ambient.x << ' ' << v.Ambient.y << ' ' << v.Ambient.z << ' ' << v.Ambient.w << ")\n";
+	file << "          Specular(" << v.Specular.x << ' ' << v.Specular.y << ' ' << v.Specular.z << ' ' << v.Specular.w << ")\n";
+	file << "          Emission(" << v.Emission.x << ' ' << v.Emission.y << ' ' << v.Emission.z << ")\n";
+	file << "          Metallic " << v.Metallic << "  Roughness " << v.Roughness
+		<< "  AO " << v.OcclusionMask << "  AlphaTest " << v.AlphaTest << '\n';
+
+	file << "  Shader \"" << m.ShaderName << "\"\n";
+	file << "  Tex D0 \"" << m.DiffuseMap0Name << "\"\n";
+	file << "      D1 \"" << m.DiffuseMap1Name << "\"\n";
+	file << "      D2 \"" << m.DiffuseMap2Name << "\"\n";
+	file << "      D3 \"" << m.DiffuseMap3Name << "\"\n";
+	file << "      N  \"" << m.NormalMapName << "\"\n";
+	file << "      S  \"" << m.SpecularcMapName << "\"\n";
+	file << "      E  \"" << m.EmissiveMapName << "\"\n";
+	file << "      M  \"" << m.MetallicMapName << "\"\n";
+	file << "      AO \"" << m.OcclusionMapName << "\"\n";
+}
+
+void FBXLoader::WriteBoneDataText(std::ofstream& file, const FbxBoneInfo& boneInfo, size_t idx)
+{
+	file << "Bone " << idx << '\n';
+	file << "  Name \"" << boneInfo.BoneName << "\"\n";
+	file << "  ParentIndex " << boneInfo.ParentIndex << '\n';
+	file << "  MatOffset\n";
+	WriteMats(file, boneInfo.MatOffset); // FbxAMatrix -> 4x4로 변환 출력
+}
+
+void FBXLoader::WriteAnimClipDataText(std::ofstream& file, const FbxAnimClipInfo& animClipInfo, size_t idx)
+{
+	file << "Clip " << idx << '\n';
+	file << "  Name \"" << animClipInfo.Name << "\"\n";
+	file << "  StartTime " << animClipInfo.StartTime.GetSecondDouble() << '\n';
+	file << "  EndTime   " << animClipInfo.EndTime.GetSecondDouble() << '\n';
+	file << "  TimeMode  " << static_cast<uint32>(animClipInfo.Mode) << '\n';
+
+	// 트랙 수(= bones 크기와 동일하도록 생성되어 있음)
+	file << "  BoneTrackCount " << animClipInfo.KeyFrames.size() << '\n';
+
+	for (size_t b = 0; b < animClipInfo.KeyFrames.size(); ++b) {
+		const auto& track = animClipInfo.KeyFrames[b];
+		file << "  Track " << b << "  KeyCount " << track.size() << '\n';
+		for (size_t k = 0; k < track.size(); ++k) {
+			const auto& key = track[k];
+			file << "    Key " << k << "  Time " << key.Time << '\n';
+			file << "    MatTransform\n";
+			WriteMats(file, key.MatTransform); // FbxAMatrix -> 변환하여 출력
+		}
 	}
 }

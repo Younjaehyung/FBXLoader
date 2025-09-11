@@ -1,4 +1,5 @@
 #pragma once
+#define NOMINMAX
 
 #include <iostream>
 #include <memory>
@@ -8,6 +9,9 @@
 #include <filesystem>
 #include <fstream>
 #include <wrl.h>
+#include <algorithm>
+#include <iomanip>
+#include <cfloat>
 #include "SimpleMath.h"
 #include "fbxsdk.h"
 
@@ -30,7 +34,6 @@ namespace fs = std::filesystem;
 using namespace DirectX;
 using namespace DirectX::PackedVector;
 using namespace Microsoft::WRL;
-
 
 using int8 = __int8;
 using int16 = __int16;
@@ -66,48 +69,81 @@ struct Vertex {
 // Utils
 //string s2ws( string& s);
 //string ws2s( string& s);
-
-// Animation
-struct KeyFrameInfo
-{
-	double	time;
-	int32	frame;
-	Vec3	scale;
-	Vec4	rotation;
-	Vec3	translate;
-};
-
-struct Animator
-{
-	uint32			mSkeletonHandle;	// if Skeleton Enable use this Handle
-
-	wstring			animName;
-	int32			frameCount;
-	double			duration;
-	vector<vector<KeyFrameInfo>>	keyFrames;
-};
-
-
-
-
-// Skeleton
-struct Skeleton
-{
-	uint32 mStartOffset;
-	uint32 mEndOffset;
-	std::vector<BoneInfo> mBones;
-};
-
-struct SkeletonInfo
-{
-	uint32 StartOffset;
-	uint32 EndOffset;
-
-};
-
-struct BoneInfo
-{
-	wstring					boneName;
-	int32					parentIdx;
-	Matrix					matOffset;
-};
+//
+//// Animation
+//struct KeyFrameInfo
+//{
+//	double	time;
+//	int32	frame;
+//	Vec3	scale;
+//	Vec4	rotation;
+//	Vec3	translate;
+//};
+//
+//struct Animator
+//{
+//	wstring			animName;
+//	int32			frameCount;
+//	double			duration;
+//	vector<vector<KeyFrameInfo>>	keyFrames;
+//};
+//
+//// Mesh
+//struct IndexBufferInfo
+//{
+//	vector<Vertex>		VertexBuffer;
+//	vector<uint32>		IndexBuffer;
+//	DXGI_FORMAT			Format;
+//	uint32				Count;
+//};
+//
+//// Materials
+//struct MaterialParams
+//{
+//	Vec4 Diffuse{};
+//
+//	Vec3 Emission{};
+//
+//	float Metallic{};
+//	float Roughness{};
+//	uint32 OcclusionMask{};
+//	uint32 AlphaTest{};
+//
+//	int32 DiffuseMap0Name{};
+//	int32 DiffuseMap1Name{};
+//	int32 DiffuseMap2Name{};
+//	int32 DiffuseMap3Name{};
+//
+//	int32 NormalMapName{};
+//	int32 EmissiveMapName{};
+//	int32 MetallicMapName{};
+//	int32 OcclusionMapName{};
+//};
+//
+//struct Materials
+//{
+//	wstring				mShaderName;
+//	MaterialParams		mParams{};	//머테리얼 parm
+//};
+//
+//// Skeleton
+//struct BoneInfo
+//{
+//	wstring					boneName;
+//	int32					parentIdx;
+//	Matrix					matOffset;
+//};
+//
+//struct Skeleton
+//{
+//	uint32 mStartOffset;
+//	uint32 mEndOffset;
+//	std::vector<BoneInfo> mBones;
+//};
+//
+//struct SkeletonInfo
+//{
+//	uint32 StartOffset;
+//	uint32 EndOffset;
+//};
+//
