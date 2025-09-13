@@ -67,9 +67,9 @@ struct Vertex {
 };
 
 // Utils
-//string s2ws( string& s);
-//string ws2s( string& s);
-//
+wstring s2ws(const string& s);
+string ws2s(const wstring& s);
+
 //// Animation
 //struct KeyFrameInfo
 //{

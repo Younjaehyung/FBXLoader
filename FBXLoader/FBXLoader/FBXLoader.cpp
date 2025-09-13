@@ -258,7 +258,13 @@ void FBXLoader::LoadMesh(FbxMesh* mesh)
 	mMeshes.push_back(FbxMeshInfo());
 	FbxMeshInfo& meshInfo = mMeshes.back();
 
-	meshInfo.Name = mesh->GetName();
+	FbxNode* node = mesh->GetNode();
+	const char* nodeName = node ? node->GetName() : nullptr;
+	const char* attrName = mesh->GetName();
+
+	if (nodeName && nodeName[0])          meshInfo.Name = nodeName;             // 1순위: 노드 이름
+	else if (attrName && attrName[0])     meshInfo.Name = attrName;
+
 
 	const int32 vertexCount = mesh->GetControlPointsCount();
 	meshInfo.Vertices.resize(vertexCount);
@@ -318,12 +324,14 @@ void FBXLoader::LoadMaterial(FbxSurfaceMaterial* surfaceMaterial)
 	materialValue.Specular = GetMaterialData(surfaceMaterial, FbxSurfaceMaterial::sSpecular, FbxSurfaceMaterial::sSpecularFactor);
 
 	//material.name = surfaceMaterial->GetName();
-
+	
 	material.MaterialValueInfo = materialValue;
-
-	material.DiffuseMap0Name = GetTextureRelativeName(surfaceMaterial, FbxSurfaceMaterial::sDiffuse);
-	material.NormalMapName = GetTextureRelativeName(surfaceMaterial, FbxSurfaceMaterial::sNormalMap);
-	material.SpecularcMapName = GetTextureRelativeName(surfaceMaterial, FbxSurfaceMaterial::sSpecular);
+	material.ShaderName = ws2s(fs::path(GetTextureRelativeName(surfaceMaterial, FbxSurfaceMaterial::sShadingModel)).filename());
+	material.DiffuseMap0Name = ws2s(fs::path(GetTextureRelativeName(surfaceMaterial, FbxSurfaceMaterial::sDiffuse)).filename());
+	material.NormalMapName = ws2s(fs::path(GetTextureRelativeName(surfaceMaterial, FbxSurfaceMaterial::sNormalMap)).filename());
+	material.EmissiveMapName = ws2s(fs::path(GetTextureRelativeName(surfaceMaterial, FbxSurfaceMaterial::sEmissive)).filename());
+	material.SpecularcMapName = ws2s(fs::path(GetTextureRelativeName(surfaceMaterial, FbxSurfaceMaterial::sSpecular)).filename());
+	
 
 	mMeshes.back().Materials.push_back(material);
 }
@@ -580,6 +588,7 @@ bool FBXLoader::ExportToBinary(const string& outputPath)
 
 
 			// 2. Write BoneData
+			WriteString(file, fs::path(outputPath).filename().stem().string());
 			for (const auto& boneInfo : mBones)
 			{
 				std::cout << "Bone START" << std::endl;
@@ -680,31 +689,34 @@ void FBXLoader::WriteMeshData(std::ofstream& file, const FbxMeshInfo& meshInfo)
 	}
 
 	// Write Materials Index
+	int i = 0;
 	for (const auto& materialInfo : meshInfo.Materials)
 	{
+		// 문자열들 작성
+		WriteString(file, mFileName + std::to_string(i++));
 		WriteMaterialData(file, materialInfo);
 	}
 
-	// Write BoneWeight Index (if Animation is exist)
-	if (meshInfo.hasAnimation && !meshInfo.BoneWeights.empty())
-	{
-		// 본 웨이트 개수 작성
-		uint32 boneWeightCount = static_cast<uint32>(meshInfo.BoneWeights.size());
-		file.write(reinterpret_cast<const char*>(&boneWeightCount), sizeof(uint32));
+	//// Write BoneWeight Index (if Animation is exist)
+	//if (meshInfo.hasAnimation && !meshInfo.BoneWeights.empty())
+	//{
+	//	// 본 웨이트 개수 작성
+	//	uint32 boneWeightCount = static_cast<uint32>(meshInfo.BoneWeights.size());
+	//	file.write(reinterpret_cast<const char*>(&boneWeightCount), sizeof(uint32));
 
-		// 각 정점의 본 웨이트 데이터 작성
-		for (const auto& boneWeight : meshInfo.BoneWeights)
-		{
-			uint32 weightCount = static_cast<uint32>(boneWeight.boneWeights.size());
-			file.write(reinterpret_cast<const char*>(&weightCount), sizeof(uint32));
+	//	// 각 정점의 본 웨이트 데이터 작성
+	//	for (const auto& boneWeight : meshInfo.BoneWeights)
+	//	{
+	//		uint32 weightCount = static_cast<uint32>(boneWeight.boneWeights.size());
+	//		file.write(reinterpret_cast<const char*>(&weightCount), sizeof(uint32));
 
-			for (const auto& weight : boneWeight.boneWeights)
-			{
-				file.write(reinterpret_cast<const char*>(&weight.first), sizeof(int32));
-				file.write(reinterpret_cast<const char*>(&weight.second), sizeof(double));
-			}
-		}
-	}
+	//		for (const auto& weight : boneWeight.boneWeights)
+	//		{
+	//			file.write(reinterpret_cast<const char*>(&weight.first), sizeof(int32));
+	//			file.write(reinterpret_cast<const char*>(&weight.second), sizeof(double));
+	//		}
+	//	}
+	//}
 }
 
 void FBXLoader::WriteMaterialData(std::ofstream& file, const FbxMaterialInfo& materialInfo)
@@ -722,18 +734,18 @@ void FBXLoader::WriteMaterialData(std::ofstream& file, const FbxMaterialInfo& ma
 	file.write(reinterpret_cast<const char*>(&binaryMaterialInfo), sizeof(MaterialValue));
 
 	// 문자열들 작성
-	WriteString(file, materialInfo.ShaderName);
+	WriteString(file, materialInfo.ShaderName.c_str());
 
-	WriteString(file, materialInfo.DiffuseMap0Name);
-	WriteString(file, materialInfo.DiffuseMap1Name);
-	WriteString(file, materialInfo.DiffuseMap2Name);
-	WriteString(file, materialInfo.DiffuseMap3Name);
+	WriteString(file, materialInfo.DiffuseMap0Name.c_str());
+	WriteString(file, materialInfo.DiffuseMap1Name.c_str());
+	WriteString(file, materialInfo.DiffuseMap2Name.c_str());
+	WriteString(file, materialInfo.DiffuseMap3Name.c_str());
 
-	WriteString(file, materialInfo.NormalMapName);
-	WriteString(file, materialInfo.SpecularcMapName);
-	WriteString(file, materialInfo.EmissiveMapName);
-	WriteString(file, materialInfo.MetallicMapName);
-	WriteString(file, materialInfo.OcclusionMapName);
+	WriteString(file, materialInfo.NormalMapName.c_str());
+	WriteString(file, materialInfo.SpecularcMapName.c_str());
+	WriteString(file, materialInfo.EmissiveMapName.c_str());
+	WriteString(file, materialInfo.MetallicMapName.c_str());
+	WriteString(file, materialInfo.OcclusionMapName.c_str());
 }
 
 void FBXLoader::WriteBoneData(std::ofstream& file, const FbxBoneInfo& boneInfo)
@@ -881,32 +893,32 @@ bool FBXLoader::LoadFromBinary(const std::string& anyOfThreePaths)
 				for (uint32 s = 0; s < bmi.MaterialCount; ++s)
 					m.Materials[s] = ReadMaterialData_Impl(f);
 
-				// BoneWeights (optional)
-				m.hasAnimation = (bmi.HasAnimation != 0);
-				if (m.hasAnimation)
-				{
-					uint32 bwCount = 0;
-					f.read(reinterpret_cast<char*>(&bwCount), sizeof(bwCount));
-					m.BoneWeights.resize(bwCount);
+				//// BoneWeights (optional)
+				//m.hasAnimation = (bmi.HasAnimation != 0);
+				//if (m.hasAnimation)
+				//{
+				//	uint32 bwCount = 0;
+				//	f.read(reinterpret_cast<char*>(&bwCount), sizeof(bwCount));
+				//	m.BoneWeights.resize(bwCount);
 
-					for (uint32 v = 0; v < bwCount; ++v)
-					{
-						uint32 weightCount = 0;
-						f.read(reinterpret_cast<char*>(&weightCount), sizeof(weightCount));
+				//	for (uint32 v = 0; v < bwCount; ++v)
+				//	{
+				//		uint32 weightCount = 0;
+				//		f.read(reinterpret_cast<char*>(&weightCount), sizeof(weightCount));
 
-						auto& bw = m.BoneWeights[v].boneWeights;
-						bw.clear();
-						bw.reserve(weightCount);
+				//		auto& bw = m.BoneWeights[v].boneWeights;
+				//		bw.clear();
+				//		bw.reserve(weightCount);
 
-						for (uint32 k = 0; k < weightCount; ++k)
-						{
-							int32 idx; double wt;
-							f.read(reinterpret_cast<char*>(&idx), sizeof(idx));
-							f.read(reinterpret_cast<char*>(&wt), sizeof(wt));
-							bw.emplace_back(idx, wt);
-						}
-					}
-				}
+				//		for (uint32 k = 0; k < weightCount; ++k)
+				//		{
+				//			int32 idx; double wt;
+				//			f.read(reinterpret_cast<char*>(&idx), sizeof(idx));
+				//			f.read(reinterpret_cast<char*>(&wt), sizeof(wt));
+				//			bw.emplace_back(idx, wt);
+				//		}
+				//	}
+				//}
 
 				mBMeshes.emplace_back(m);
 			}
@@ -1051,10 +1063,7 @@ void FBXLoader::PrintBinaray()
 		for (auto& v : m.Materials) {
 
 		}
-		for (auto& v : m.BoneWeights) {
 
-		}
-		
 
 
 		// BoneWeights (optional)

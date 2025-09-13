@@ -307,9 +307,8 @@ struct YBMeshInfo
 	string								Name;
 	vector<Vertex>						Vertices;
 	vector<vector<uint32>>				Indices;
-	vector<FbxMaterialInfo>				Materials;
-	vector<BoneWeight>					BoneWeights; // �� ����ġ
-	bool								hasAnimation;
+	vector<FbxMaterialInfo>				Materials;	
+	//bool								hasAnimation;
 };
 
 

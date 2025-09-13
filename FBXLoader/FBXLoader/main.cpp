@@ -55,7 +55,7 @@ int main() {
 		if (in == "") {
 			std::cin >> in;
 		}
-
+		in = "..\\Resources\\FBX\\" + in;
 		std::string out{ fs::path(in).parent_path().string() + "\\" + fs::path(in).filename().stem().string() + ".bin" };
 
 		if (flag == 1) {
