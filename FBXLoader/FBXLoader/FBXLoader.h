@@ -340,6 +340,21 @@ struct YAnimClipInfo
 
 
 
+struct VertexKey {
+	Vertex v;
+	bool operator==(const VertexKey& o) const {
+		return memcmp(&v, &o.v, sizeof(Vertex)) == 0;
+	}
+};
+struct VertexKeyHash {
+	size_t operator()(const VertexKey& k) const {
+		// 간단 해시 (원한다면 더 견고하게)
+		const uint64_t* p = reinterpret_cast<const uint64_t*>(&k.v);
+		size_t h = 1469598103934665603ull;
+		for (size_t i = 0; i < sizeof(Vertex) / 8; ++i) { h ^= p[i]; h *= 1099511628211ull; }
+		return h;
+	}
+};
 
 class FBXLoader
 {
@@ -373,6 +388,7 @@ private:
 	void LoadMesh(FbxMesh* mesh);
 	void LoadMaterial(FbxSurfaceMaterial* surfaceMaterial);
 
+
 	// Animation
 	void LoadBones(FbxNode* node) { LoadBones(node, 0, -1); }
 	void LoadBones(FbxNode* node, int32 idx, int32 parentIdx);
@@ -384,6 +400,7 @@ private:
 	void LoadKeyframe(int32 animIndex, FbxNode* node, FbxCluster* cluster, const FbxAMatrix& matNodeTransform, int32 boneIdx, FbxMeshInfo* container);
 
 
+	void FillBoneWeightPerVertex(FbxMesh* mesh, FbxMeshInfo* meshInfo, const std::vector<uint32_t>& cpOfVertex);
 
 	void FillBoneWeight(FbxMesh* mesh, FbxMeshInfo* meshInfo);
 
