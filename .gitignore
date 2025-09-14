@@ -453,10 +453,11 @@ FodyWeavers.xsd
 *.sln.iml
 
 # .lib
-!Library/
-!Library/Include/**
-!Library/Lib/**
-
+!FBXLoader/Library/
+!FBXLoader/Library/Include/
+!FBXLoader/Library/Include/**
+!FBXLoader/Library/Include/
+!FBXLoader/Library/Lib/**
 
 ### VisualStudio Patch ###
 # Additional files built by Visual Studio
