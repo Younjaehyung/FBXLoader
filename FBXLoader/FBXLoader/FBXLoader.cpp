@@ -500,7 +500,7 @@ void FBXLoader::LoadAnimationData(FbxMesh* mesh, FbxMeshInfo* meshInfo)
 		if (!fbxSkin) continue;
 
 		FbxSkin::EType type = fbxSkin->GetSkinningType();
-		if (type != FbxSkin::eRigid && type != FbxSkin::eLinear) continue;
+		//if (type != FbxSkin::eRigid && type != FbxSkin::eLinear) continue;
 
 		const int32 clusterCount = fbxSkin->GetClusterCount();
 		for (int32 j = 0; j < clusterCount; j++)
