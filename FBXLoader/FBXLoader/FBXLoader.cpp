@@ -643,7 +643,7 @@ bool FBXLoader::ExportToBinary(const string& outputPath)
 	try
 	{
 		{
-			std::string out{ fs::path(outputPath).parent_path().string() + "\\" + fs::path(outputPath).filename().stem().string() + ".mesh" };
+			std::string out{ fs::path(outputPath).parent_path().string() + "\\" "Binary" + "\\" + fs::path(outputPath).filename().stem().string() + ".mesh" };
 			std::ofstream file(out, std::ios::binary);
 			if (!file.is_open())
 			{
@@ -678,7 +678,7 @@ bool FBXLoader::ExportToBinary(const string& outputPath)
 		}
 		{
 
-			std::string out{ fs::path(outputPath).parent_path().string() + "\\" + fs::path(outputPath).filename().stem().string() + ".skel" };
+			std::string out{ fs::path(outputPath).parent_path().string() + "\\" "Binary" + "\\" + fs::path(outputPath).filename().stem().string() + ".skel" };
 			std::ofstream file(out, std::ios::binary);
 			if (!file.is_open())
 			{
@@ -704,7 +704,7 @@ bool FBXLoader::ExportToBinary(const string& outputPath)
 			file.close();
 		}
 		{
-			std::string out{ fs::path(outputPath).parent_path().string() + "\\" + fs::path(outputPath).filename().stem().string() + ".ani" };
+			std::string out{ fs::path(outputPath).parent_path().string() + "\\" "Binary" + "\\" + fs::path(outputPath).filename().stem().string() + ".ani"};
 			std::ofstream file(out, std::ios::binary);
 			if (!file.is_open())
 			{
@@ -1217,7 +1217,7 @@ bool FBXLoader::ExportToText(const std::string& outputPath)
 	try {
 		// 공통 헤더(카운트) 정보는 .mesh 텍스트 파일 맨 처음에만 씀
 		{
-			std::string out = fs::path(outputPath).parent_path().string() + "\\" +
+			std::string out = fs::path(outputPath).parent_path().string() + "\\" + "Text"  "\\" +
 				fs::path(outputPath).filename().stem().string() + ".mesh.txt";
 			std::ofstream file(out);
 			if (!file.is_open()) return false;
@@ -1237,7 +1237,7 @@ bool FBXLoader::ExportToText(const std::string& outputPath)
 
 		// Skeleton
 		{
-			std::string out = fs::path(outputPath).parent_path().string() + "\\" +
+			std::string out = fs::path(outputPath).parent_path().string() + "\\" + "Text" "\\" +
 				fs::path(outputPath).filename().stem().string() + ".skel.txt";
 			std::ofstream file(out);
 			if (!file.is_open()) return false;
@@ -1253,7 +1253,7 @@ bool FBXLoader::ExportToText(const std::string& outputPath)
 
 		// Animations
 		{
-			std::string out = fs::path(outputPath).parent_path().string() + "\\" +
+			std::string out = fs::path(outputPath).parent_path().string() + "\\" + "Text"  "\\" +
 				fs::path(outputPath).filename().stem().string() + ".ani.txt";
 			std::ofstream file(out);
 			if (!file.is_open()) return false;
