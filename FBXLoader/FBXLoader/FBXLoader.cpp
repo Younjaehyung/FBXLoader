@@ -792,7 +792,7 @@ void FBXLoader::WriteMeshData(std::ofstream& file, const FbxMeshInfo& meshInfo)
 	int i = 0;
 	for (const auto& materialInfo : meshInfo.Materials)
 	{
-		// 문자열들 작성
+		// 문자열들 작성 , 머테리얼 이름 TO -DO
 		WriteString(file, mFileName + std::to_string(i++));
 		WriteMaterialData(file, materialInfo);
 	}

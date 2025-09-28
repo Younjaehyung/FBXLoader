@@ -46,10 +46,7 @@ int main() {
 
 
 		std::string in{};
-		int flag{};
 
-		std::cout << "Press 1 if you want to debug, Press 0 if you want to export files" << std::endl;
-		std::cin >> flag;
 		std::cout << "Please enter the file name" << std::endl;
 
 		if (in == "") {
@@ -58,14 +55,13 @@ int main() {
 		in = "..\\Resources\\FBX\\" + in;
 		std::string out{ fs::path(in).parent_path().string() + "\\" + fs::path(in).filename().stem().string() + ".bin" };
 
-		if (flag == 1) {
-			std::cout << "Start debugging." << std::endl;
-			FBXLoader importer;
-			importer.LoadFromBinary(out);
-			//importer.PrintBinaray();
-			
-			return 1;
-		}
+
+			//std::cout << "Start debugging." << std::endl;
+			//FBXLoader importer;
+			//importer.LoadFromBinary(out);
+			////importer.PrintBinaray();
+
+		
 
 		std::cout << "Start Export." << std::endl;
 
@@ -87,6 +83,7 @@ int main() {
 		//(loader.ExportToBinary("..\\Resources\\FBX\\Dragon.bin"))
 		if (loader.ExportToBinary(out))
 		{
+			int flag = 0;
 			std::wcout << L"Successfully exported to binary format!" << std::endl;
 			std::wcout << L"If you want to debug press 1." << std::endl;
 			std::wcout << L"If you want to complete press any key" << std::endl;
