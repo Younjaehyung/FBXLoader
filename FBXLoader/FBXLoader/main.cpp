@@ -1,5 +1,5 @@
 #include "pch.h"
-
+#include <filesystem>
 #include "FBXLoader.h"
 #include "FBXExporter.h"
 // ��� ���� �ڵ�
@@ -36,8 +36,16 @@
 //
 //}
 
-//int main(int argc, char** argv) {
+namespace fs = std::filesystem;
 
+//int main(int argc, char** argv) {
+static bool HasFbxExtension(const fs::path& p)
+{
+	// [추가] .FBX 같은 대문자도 처리
+	auto ext = p.extension().string();
+	for (auto& c : ext) c = (char)tolower((unsigned char)c);
+	return ext == ".fbx";
+}
 	
 int main() {
 
@@ -49,76 +57,124 @@ int main() {
 
 		std::cout << "Please enter the file name" << std::endl;
 
-		if (in == "") {
-			std::cin >> in;
+		std::cin >> in;
+
+
+		const fs::path fbxDir = fs::path("..\\Resources\\FBX\\");
+
+		if (in == "all")
+		{
+			if (!fs::exists(fbxDir) || !fs::is_directory(fbxDir))
+			{
+				std::wcerr << L"[ERR] FBX directory not found: " << fbxDir.wstring() << std::endl;
+				return 1;
+			}
+
+			std::cout << "Start Export ALL." << std::endl;
+
+			size_t successCount = 0;
+			size_t failCount = 0;
+
+			for (const auto& entry : fs::directory_iterator(fbxDir))
+			{
+				if (!entry.is_regular_file()) continue;
+
+				const fs::path inPath = entry.path();
+				if (!HasFbxExtension(inPath)) continue;
+
+				// out 경로: 같은 폴더에 동일 stem으로 .bin 생성
+				const fs::path outPath = inPath.parent_path() / (inPath.stem().string() + ".bin");
+
+				std::cout << "[Export] " << inPath.string() << " -> " << outPath.string() << std::endl;
+
+				// [주의] loader 내부에 이전 FBX 상태가 남는 구조라면
+				// 매 파일마다 새 loader를 만드는 게 안전합니다.
+				// 여기서는 안전하게 매번 새로 생성.
+				FBXLoader perFileLoader;
+
+				perFileLoader.LoadFbx(inPath.string());
+
+				if (perFileLoader.ExportToBinary(outPath.string()))
+				{
+					// 필요하면 텍스트 디버그 덤프도 생성
+					perFileLoader.ExportToText(outPath.string());
+					++successCount;
+				}
+				else
+				{
+					std::wcerr << L"[FAIL] " << inPath.wstring() << std::endl;
+					++failCount;
+				}
+			}
+
+			std::cout << "Done. success=" << successCount << " fail=" << failCount << std::endl;
+			return (failCount == 0) ? 0 : 2;
 		}
+			
+
 		in = "..\\Resources\\FBX\\" + in;
 		std::string out{ fs::path(in).parent_path().string() + "\\" + fs::path(in).filename().stem().string() + ".bin" };
 
-
-			//std::cout << "Start debugging." << std::endl;
-			//FBXLoader importer;
-			//importer.LoadFromBinary(out);
-			////importer.PrintBinaray();
 
 		
 
 		std::cout << "Start Export." << std::endl;
 
 
-		//if (argc < 1) {
-		//	printf("Usage: FbxToBin.exe <input.fbx> <output.bin>\n");
-		//	return 0;
-		//}
-		//else if (argc < 2) {
-		//	printf("ExportToBinary Data has been exported to .bin file. \n");
-		//	out = fs::path(in).parent_path().string() + "\\" + fs::path(in).filename().stem().string() + ".bin";
-		//}
+		const fs::path inPath = fbxDir / fs::path(in);
+		const fs::path outPath = inPath.parent_path() / (inPath.stem().string() + ".bin");
 
+		std::cout << "Start Export." << std::endl;
 
-		//loader.LoadFbx("..\\Resources\\FBX\\Dragon.fbx");
-		loader.LoadFbx(in);
+		loader.LoadFbx(inPath.string());
 
-		// export
-		//(loader.ExportToBinary("..\\Resources\\FBX\\Dragon.bin"))
-		if (loader.ExportToBinary(out))
+		if (loader.ExportToBinary(outPath.string()))
 		{
-			int flag = 0;
 			std::wcout << L"Successfully exported to binary format!" << std::endl;
-			std::wcout << L"If you want to debug press 1." << std::endl;
-			std::wcout << L"If you want to complete press any key" << std::endl;
-			loader.ExportToText(out);
-			std::cin >> in;
-			if (flag == 1) {
-				std::cout << "Start debugging." << std::endl;
-				FBXLoader ximporter;
-				ximporter.LoadFromBinary(out);
-				
-				ximporter.PrintBinaray();
-				
-				return 1;
-			}
 
 
-			
+			loader.ExportToText(outPath.string());
+
+
+			return 0;
 		}
 		else
 		{
-			// export ����
 			std::wcerr << L"Failed to export to binary format!" << std::endl;
-			return 0;
+			return 1;
 		}
 
-	
+		// 원래 코드
+		//loader.LoadFbx(in);
 
-	//ConvertOptions opt{};
-	//if (argc >= 4) opt.sampleRate = std::atof(argv[3]);
+		//// export
+		//if (loader.ExportToBinary(out))
+		//{
+		//	int flag = 0;
+		//	std::wcout << L"Successfully exported to binary format!" << std::endl;
+		//	std::wcout << L"If you want to debug press 1." << std::endl;
+		//	std::wcout << L"If you want to complete press any key" << std::endl;
+		//	loader.ExportToText(out);
+		//	std::cin >> in;
+		//	if (flag == 1) {
+		//		std::cout << "Start debugging." << std::endl;
+		//		FBXLoader ximporter;
+		//		ximporter.LoadFromBinary(out);
+		//		
+		//		ximporter.PrintBinaray();
+		//		
+		//		return 1;
+		//	}
 
 
-	//if (!std::filesystem::exists(in)) {
-	//	printf("[ERR] Input not found.\n");
-	//	return 1;
-	//}
-	//bool ok = ConvertFbxToBin(in, out, opt);
-	//return ok ? 0 : 2;
+		//	
+		//}
+		//else
+		//{
+		//	// export ����
+		//	std::wcerr << L"Failed to export to binary format!" << std::endl;
+		//	return 0;
+		//}
+
+
 }
