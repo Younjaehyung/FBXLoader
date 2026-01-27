@@ -120,8 +120,9 @@ int main() {
 
 		std::cout << "Start Export." << std::endl;
 
+		
 
-		const fs::path inPath = fbxDir / fs::path(in);
+		const fs::path inPath = fs::path(in);
 		const fs::path outPath = inPath.parent_path() / (inPath.stem().string() + ".bin");
 
 		std::cout << "Start Export." << std::endl;
