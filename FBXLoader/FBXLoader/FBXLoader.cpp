@@ -1,4 +1,4 @@
-﻿#include "pch.h"
+#include "pch.h"
 #include "FBXLoader.h"
 
 
@@ -68,8 +68,9 @@ void FBXLoader::Import(const string& path)
 
 	mImporter->Import(mScene);
 
-	mScene->GetGlobalSettings().SetAxisSystem(FbxAxisSystem::DirectX);
-
+	//mScene->GetGlobalSettings().SetAxisSystem(FbxAxisSystem::DirectX);
+	FbxSystemUnit::cm.ConvertScene(mScene);
+	FbxAxisSystem::DirectX.ConvertScene(mScene);
 	// �� ������ �ﰢ��ȭ �� �� �ִ� ��� ��带 �ﰢ��ȭ ��Ų��.
 	FbxGeometryConverter geometryConverter(mManager);
 	geometryConverter.Triangulate(mScene, true);
@@ -259,8 +260,18 @@ void FBXLoader::LoadMesh(FbxMesh* mesh)
 	mMeshes.push_back(FbxMeshInfo());
 	FbxMeshInfo& meshInfo = mMeshes.back();
 
+	FbxNode* node = mesh->GetNode();
+	FbxAMatrix nodeTransform;
+	FbxAMatrix normalTransform;
+	if (node)
+	{
+		const FbxAMatrix geometricTransform = GetTransform(node);
+		nodeTransform = node->EvaluateGlobalTransform() * geometricTransform;
+		normalTransform = nodeTransform.Inverse().Transpose();
+	}
+
 	// 이름 설정(기존 로직 유지)
-	if (FbxNode* node = mesh->GetNode())
+	if (node)
 	{
 		const char* nodeName = node->GetName();
 		const char* attrName = mesh->GetName();
@@ -323,11 +334,18 @@ void FBXLoader::LoadMesh(FbxMesh* mesh)
 
 			// --- pos (기존 좌표 스왑 규칙 유지: y↔z)
 			FbxVector4 P = cp[cpIdx];
+			if (node)
+				P = nodeTransform.MultT(P);
 			Vec3 pos{ (float)P[0], (float)P[2], (float)P[1] };
 
 			// --- normal: 코너 단위로 안전하게
 			FbxVector4 N{};
 			mesh->GetPolygonVertexNormal(i, j, N);
+			if (node)
+			{
+				N[3] = 0.0;
+				N = normalTransform.MultT(N);
+			}
 			N.Normalize();
 			Vec3 nrm{ (float)N[0], (float)N[2], (float)N[1] };
 
@@ -352,6 +370,11 @@ void FBXLoader::LoadMesh(FbxMesh* mesh)
 					T = tanElem->GetDirectArray().GetAt(idx);
 				else // eIndexToDirect
 					T = tanElem->GetDirectArray().GetAt(tanElem->GetIndexArray().GetAt(idx));
+			}
+			if (node)
+			{
+				T[3] = 0.0;
+				T = normalTransform.MultT(T);
 			}
 			Vec3 tan{ (float)T[0], (float)T[2], (float)T[1] };
 
