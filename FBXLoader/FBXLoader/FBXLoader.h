@@ -371,7 +371,8 @@ public:
 	vector<FbxAnimClipInfo>& GetAnimClip() { return mAnimClips; }
 private:
 	void Import(const string& path);
-	void BakeNodeScaling(FbxNode* node);
+	void BakeNodeScaling(FbxNode* node);// 스케일 애니메이션 체크 헬퍼 함수
+	bool HasScaleAnimation(FbxNode* node);
 	void ParseNode(FbxNode* root);
 	
 private:

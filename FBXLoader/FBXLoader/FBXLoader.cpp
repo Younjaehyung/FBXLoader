@@ -118,21 +118,28 @@ void FBXLoader::BakeNodeScaling(FbxNode* node)
 		FbxMesh* mesh = node->GetMesh();
 		if (mesh)
 		{
-			const FbxVector4 localScale = node->LclScaling.Get();
+			// ★ 수정: 글로벌 Transform을 가져와서 스케일 추출
+			FbxAMatrix globalTransform = node->EvaluateGlobalTransform();
+			FbxVector4 globalScale = globalTransform.GetS();
+
 			const FbxVector4 geoScale = node->GetGeometricScaling(FbxNode::eSourcePivot);
 
-			// 스케일이 1이 아닌 경우에만 베이크
 			const double tolerance = 0.0001;
 			bool needsBaking =
-				(fabs(localScale[0] - 1.0) > tolerance || fabs(localScale[1] - 1.0) > tolerance || fabs(localScale[2] - 1.0) > tolerance) ||
-				(fabs(geoScale[0] - 1.0) > tolerance || fabs(geoScale[1] - 1.0) > tolerance || fabs(geoScale[2] - 1.0) > tolerance);
+				(fabs(globalScale[0] - 1.0) > tolerance ||
+					fabs(globalScale[1] - 1.0) > tolerance ||
+					fabs(globalScale[2] - 1.0) > tolerance) ||
+				(fabs(geoScale[0] - 1.0) > tolerance ||
+					fabs(geoScale[1] - 1.0) > tolerance ||
+					fabs(geoScale[2] - 1.0) > tolerance);
 
 			if (needsBaking)
 			{
+				// ★ 글로벌 스케일 + 지오메트릭 스케일 적용
 				const FbxVector4 totalScale(
-					localScale[0] * geoScale[0],
-					localScale[1] * geoScale[1],
-					localScale[2] * geoScale[2]);
+					globalScale[0] * geoScale[0],
+					globalScale[1] * geoScale[1],
+					globalScale[2] * geoScale[2]);
 
 				FbxVector4* controlPoints = mesh->GetControlPoints();
 				const int32 cpCount = mesh->GetControlPointsCount();
@@ -143,9 +150,15 @@ void FBXLoader::BakeNodeScaling(FbxNode* node)
 					controlPoints[i][2] *= totalScale[2];
 				}
 
-				// 스케일 초기화
-				node->LclScaling.Set(FbxVector4(1.0, 1.0, 1.0));
+				// 지오메트릭 스케일만 초기화 (로컬 스케일은 유지 가능)
 				node->SetGeometricScaling(FbxNode::eSourcePivot, FbxVector4(1.0, 1.0, 1.0));
+
+				// 주의: 로컬 스케일을 1로 만들면 부모-자식 관계가 깨질 수 있음
+				// 애니메이션이 없다면 초기화 가능
+				if (!HasScaleAnimation(node))
+				{
+					node->LclScaling.Set(FbxVector4(1.0, 1.0, 1.0));
+				}
 			}
 		}
 	}
@@ -153,6 +166,22 @@ void FBXLoader::BakeNodeScaling(FbxNode* node)
 	const int32 childCount = node->GetChildCount();
 	for (int32 i = 0; i < childCount; ++i)
 		BakeNodeScaling(node->GetChild(i));
+}
+
+// 스케일 애니메이션 체크 헬퍼 함수
+bool FBXLoader::HasScaleAnimation(FbxNode* node)
+{
+    FbxAnimStack* animStack = mScene->GetCurrentAnimationStack();
+    if (!animStack) return false;
+    
+    FbxAnimLayer* animLayer = animStack->GetMember<FbxAnimLayer>(0);
+    if (!animLayer) return false;
+    
+    FbxAnimCurve* curveX = node->LclScaling.GetCurve(animLayer, FBXSDK_CURVENODE_COMPONENT_X);
+    FbxAnimCurve* curveY = node->LclScaling.GetCurve(animLayer, FBXSDK_CURVENODE_COMPONENT_Y);
+    FbxAnimCurve* curveZ = node->LclScaling.GetCurve(animLayer, FBXSDK_CURVENODE_COMPONENT_Z);
+    
+    return (curveX != nullptr || curveY != nullptr || curveZ != nullptr);
 }
 
 void FBXLoader::ParseNode(FbxNode* node)
