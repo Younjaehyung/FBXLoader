@@ -92,8 +92,9 @@ void FBXLoader::Import(const string& path)
 	}
 
 	// 5. 축 시스템 변환 (DirectX 좌표계로)
+	
 	FbxAxisSystem::DirectX.ConvertScene(mScene);
-
+	mScene->GetGlobalSettings().SetAxisSystem(FbxAxisSystem::DirectX);
 	// 6. 노드 스케일링 베이크 (이미 단위 변환이 완료되었으므로 안전하게 적용)
 	BakeNodeScaling(mScene->GetRootNode());
 
