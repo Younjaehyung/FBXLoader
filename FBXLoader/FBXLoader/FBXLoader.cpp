@@ -1,4 +1,4 @@
-﻿#include "pch.h"
+#include "pch.h"
 #include "FBXLoader.h"
 
 
@@ -46,35 +46,112 @@ void FBXLoader::LoadFbx(const string& path)
 *****************************/
 void FBXLoader::Import(const string& path)
 {
-	// FBX SDK ������ ��ü ����
+	// FBX SDK 매니저 객체 생성
 	mManager = FbxManager::Create();
 
-	// IOSettings ��ü ���� �� ����
+	// IOSettings 객체 생성 및 설정
 	FbxIOSettings* settings = FbxIOSettings::Create(mManager, IOSROOT);
 	mManager->SetIOSettings(settings);
 
-	// FbxImporter ��ü ����
+	// FbxImporter 객체 생성
 	mScene = FbxScene::Create(mManager, "");
 
-	// ���߿� Texture ��� ����� �� �� ��
-	mResourceDirectory = fs::path(path).parent_path().string() + "\\" + fs::path(path).filename().stem().string() + ".fbm";
-	
+	// 리소스 디렉토리 설정
+	mResourceDirectory = fs::path(path).parent_path().string() + "\\" +
+		fs::path(path).filename().stem().string() + ".fbm";
 	mFileName = fs::path(path).filename().stem().string();
 
 	mImporter = FbxImporter::Create(mManager, "");
 
 	string strPath = path;
 	mImporter->Initialize(strPath.c_str(), -1, mManager->GetIOSettings());
-
 	mImporter->Import(mScene);
 
-	mScene->GetGlobalSettings().SetAxisSystem(FbxAxisSystem::DirectX);
+	// ========== 수정된 부분: 스케일 변환 통일 ==========
 
-	// �� ������ �ﰢ��ȭ �� �� �ִ� ��� ��带 �ﰢ��ȭ ��Ų��.
+	// 1. 원본 FBX의 단위 시스템 확인
+	FbxSystemUnit sceneSystemUnit = mScene->GetGlobalSettings().GetSystemUnit();
+
+	// 2. 타겟 단위 시스템 설정 (엔진에서 사용할 단위)
+	// DirectX는 보통 cm 또는 m을 사용 (프로젝트 표준에 맞게 선택)
+	FbxSystemUnit targetUnit = FbxSystemUnit::cm;  // 또는 FbxSystemUnit::m
+
+	// 3. 단위가 다를 경우에만 변환
+	if (sceneSystemUnit != targetUnit)
+	{
+		targetUnit.ConvertScene(mScene);
+	}
+
+	// 4. 추가 스케일 팩터가 있다면 적용
+	if (mScaleFactor != 1.0)
+	{
+		const double currentScale = targetUnit.GetScaleFactor();
+		const double finalScale = currentScale * mScaleFactor;
+		FbxSystemUnit customUnit(finalScale);
+		customUnit.ConvertScene(mScene);
+	}
+
+	// 5. 축 시스템 변환 (DirectX 좌표계로)
+	FbxAxisSystem::DirectX.ConvertScene(mScene);
+
+	// 6. 노드 스케일링 베이크 (이미 단위 변환이 완료되었으므로 안전하게 적용)
+	BakeNodeScaling(mScene->GetRootNode());
+
+	// ========== 수정 끝 ==========
+
+	// 삼각형화
 	FbxGeometryConverter geometryConverter(mManager);
 	geometryConverter.Triangulate(mScene, true);
 
 	mImporter->Destroy();
+}
+
+void FBXLoader::BakeNodeScaling(FbxNode* node)
+{
+	if (!node)
+		return;
+
+	FbxNodeAttribute* attribute = node->GetNodeAttribute();
+	if (attribute && attribute->GetAttributeType() == FbxNodeAttribute::eMesh)
+	{
+		FbxMesh* mesh = node->GetMesh();
+		if (mesh)
+		{
+			const FbxVector4 localScale = node->LclScaling.Get();
+			const FbxVector4 geoScale = node->GetGeometricScaling(FbxNode::eSourcePivot);
+
+			// 스케일이 1이 아닌 경우에만 베이크
+			const double tolerance = 0.0001;
+			bool needsBaking =
+				(fabs(localScale[0] - 1.0) > tolerance || fabs(localScale[1] - 1.0) > tolerance || fabs(localScale[2] - 1.0) > tolerance) ||
+				(fabs(geoScale[0] - 1.0) > tolerance || fabs(geoScale[1] - 1.0) > tolerance || fabs(geoScale[2] - 1.0) > tolerance);
+
+			if (needsBaking)
+			{
+				const FbxVector4 totalScale(
+					localScale[0] * geoScale[0],
+					localScale[1] * geoScale[1],
+					localScale[2] * geoScale[2]);
+
+				FbxVector4* controlPoints = mesh->GetControlPoints();
+				const int32 cpCount = mesh->GetControlPointsCount();
+				for (int32 i = 0; i < cpCount; ++i)
+				{
+					controlPoints[i][0] *= totalScale[0];
+					controlPoints[i][1] *= totalScale[1];
+					controlPoints[i][2] *= totalScale[2];
+				}
+
+				// 스케일 초기화
+				node->LclScaling.Set(FbxVector4(1.0, 1.0, 1.0));
+				node->SetGeometricScaling(FbxNode::eSourcePivot, FbxVector4(1.0, 1.0, 1.0));
+			}
+		}
+	}
+
+	const int32 childCount = node->GetChildCount();
+	for (int32 i = 0; i < childCount; ++i)
+		BakeNodeScaling(node->GetChild(i));
 }
 
 void FBXLoader::ParseNode(FbxNode* node)

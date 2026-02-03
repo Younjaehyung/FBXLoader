@@ -1,4 +1,4 @@
-﻿#pragma once
+#pragma once
 
 
 inline XMMATRIX FbxToXM(const FbxAMatrix& m)
@@ -371,6 +371,7 @@ public:
 	vector<FbxAnimClipInfo>& GetAnimClip() { return mAnimClips; }
 private:
 	void Import(const string& path);
+	void BakeNodeScaling(FbxNode* node);
 	void ParseNode(FbxNode* root);
 	
 private:
@@ -447,6 +448,7 @@ private:
 	vector<FbxBoneInfo>					mBones;
 	vector<FbxAnimClipInfo>				mAnimClips;
 	FbxArray<FbxString*>				mAnimNames;
+	float							mScaleFactor = 1.0f;
 private:
 	vector<YBMeshInfo>					mBMeshes;
 	vector<YBoneInfo>		mBBones;
