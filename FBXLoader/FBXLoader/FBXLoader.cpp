@@ -96,7 +96,7 @@ void FBXLoader::Import(const string& path)
 	FbxAxisSystem::DirectX.ConvertScene(mScene);
 	mScene->GetGlobalSettings().SetAxisSystem(FbxAxisSystem::DirectX);
 	// 6. 노드 스케일링 베이크 (이미 단위 변환이 완료되었으므로 안전하게 적용)
-	BakeNodeScaling(mScene->GetRootNode());
+	 BakeNodeScaling(mScene->GetRootNode());
 
 	// ========== 수정 끝 ==========
 
@@ -430,13 +430,13 @@ void FBXLoader::LoadMesh(FbxMesh* mesh)
 
 			// --- pos (기존 좌표 스왑 규칙 유지: y↔z)
 			FbxVector4 P = cp[cpIdx];
-			Vec3 pos{ (float)P[0], (float)P[2], (float)P[1] };
+			Vec3 pos{ -(float)P[1], (float)P[2], (float)P[0] };
 
 			// --- normal: 코너 단위로 안전하게
 			FbxVector4 N{};
 			mesh->GetPolygonVertexNormal(i, j, N);
 			N.Normalize();
-			Vec3 nrm{ (float)N[0], (float)N[2], (float)N[1] };
+			Vec3 nrm{ (float)N[0], (float)N[1], (float)N[2] };
 
 			// --- uv: 코너 단위로 안전하게 (V 플립 유지)
 			FbxVector2 UV{};
@@ -460,7 +460,7 @@ void FBXLoader::LoadMesh(FbxMesh* mesh)
 				else // eIndexToDirect
 					T = tanElem->GetDirectArray().GetAt(tanElem->GetIndexArray().GetAt(idx));
 			}
-			Vec3 tan{ (float)T[0], (float)T[2], (float)T[1] };
+			Vec3 tan{ (float)T[0], (float)T[1], (float)T[2] };
 
 			// --- 디듀프 키
 			VtxKey key{ pos, nrm, uv, tan };
@@ -496,8 +496,8 @@ void FBXLoader::LoadMesh(FbxMesh* mesh)
 			meshInfo.Indices.resize(subset + 1);
 
 		meshInfo.Indices[subset].push_back(outIdxTri[0]);
-		meshInfo.Indices[subset].push_back(outIdxTri[2]);
 		meshInfo.Indices[subset].push_back(outIdxTri[1]);
+		meshInfo.Indices[subset].push_back(outIdxTri[2]);
 	}
 
 	// --- 스키닝 데이터 (CP 기준 누적 → 최종 정점으로 복사)
