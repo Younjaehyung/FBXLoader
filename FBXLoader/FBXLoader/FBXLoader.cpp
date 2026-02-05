@@ -430,7 +430,7 @@ void FBXLoader::LoadMesh(FbxMesh* mesh)
 
 			// --- pos (기존 좌표 스왑 규칙 유지: y↔z)
 			FbxVector4 P = cp[cpIdx];
-			Vec3 pos{ -(float)P[1], (float)P[2], (float)P[0] };
+			Vec3 pos{ -(float)P[1], (float)P[2], -(float)P[0] };
 
 			// --- normal: 코너 단위로 안전하게
 			FbxVector4 N{};
