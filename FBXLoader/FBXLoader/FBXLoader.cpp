@@ -573,8 +573,8 @@ void FBXLoader::LoadOffsetMatrix(FbxCluster* cluster, const FbxAMatrix& matNodeT
 	// The transformation of the cluster(joint) at binding time from joint space to world space 
 	cluster->GetTransformLinkMatrix(matClusterLinkTrans);
 
-	FbxVector4 V0 = { 1, 0, 0, 0 };
-	FbxVector4 V1 = { 0, 0, 1, 0 };
+	FbxVector4 V0 = { 0, 0, -1, 0 };
+	FbxVector4 V1 = { -1, 0, 0, 0 };
 	FbxVector4 V2 = { 0, 1, 0, 0 };
 	FbxVector4 V3 = { 0, 0, 0, 1 };
 
@@ -586,7 +586,7 @@ void FBXLoader::LoadOffsetMatrix(FbxCluster* cluster, const FbxAMatrix& matNodeT
 
 	FbxAMatrix matOffset;
 	matOffset = matClusterLinkTrans.Inverse() * matClusterTrans;
-	matOffset = matReflect * matOffset * matReflect;
+	matOffset = matReflect * matOffset * matReflect.Transpose();
 
 	mBones[boneIdx].MatOffset = matOffset.Transpose();
 }
@@ -596,8 +596,8 @@ void FBXLoader::LoadKeyframe(int32 animIndex, FbxNode* node, FbxCluster* cluster
 	if (mAnimClips.empty())
 		return;
 
-	FbxVector4	v1 = { 1, 0, 0, 0 };
-	FbxVector4	v2 = { 0, 0, 1, 0 };
+	FbxVector4	v1 = { 0, 0, -1, 0 };
+	FbxVector4	v2 = { -1, 0, 0, 0 };
 	FbxVector4	v3 = { 0, 1, 0, 0 };
 	FbxVector4	v4 = { 0, 0, 0, 1 };
 	FbxAMatrix	matReflect;
@@ -624,7 +624,7 @@ void FBXLoader::LoadKeyframe(int32 animIndex, FbxNode* node, FbxCluster* cluster
 
 		FbxAMatrix matFromNode = node->EvaluateGlobalTransform(fbxTime);
 		FbxAMatrix matTransform = matFromNode.Inverse() * cluster->GetLink()->EvaluateGlobalTransform(fbxTime);
-		matTransform = matReflect * matTransform * matReflect;
+		matTransform = matReflect * matTransform * matReflect.Transpose();
 
 		keyFrameInfo.Time = fbxTime.GetSecondDouble();
 		keyFrameInfo.MatTransform = matTransform;
