@@ -1,4 +1,4 @@
-﻿#include "pch.h"
+#include "pch.h"
 #include "FBXLoader.h"
 
 
@@ -323,13 +323,13 @@ void FBXLoader::LoadMesh(FbxMesh* mesh)
 
 			// --- pos (기존 좌표 스왑 규칙 유지: y↔z)
 			FbxVector4 P = cp[cpIdx];
-			Vec3 pos{ (float)P[0], (float)P[2], (float)P[1] };
+			Vec3 pos{ -(float)P[1], (float)P[2], -(float)P[0] };
 
 			// --- normal: 코너 단위로 안전하게
 			FbxVector4 N{};
 			mesh->GetPolygonVertexNormal(i, j, N);
 			N.Normalize();
-			Vec3 nrm{ (float)N[0], (float)N[2], (float)N[1] };
+			Vec3 nrm{ -(float)N[1], (float)N[2], -(float)N[0] };
 
 			// --- uv: 코너 단위로 안전하게 (V 플립 유지)
 			FbxVector2 UV{};
@@ -353,7 +353,7 @@ void FBXLoader::LoadMesh(FbxMesh* mesh)
 				else // eIndexToDirect
 					T = tanElem->GetDirectArray().GetAt(tanElem->GetIndexArray().GetAt(idx));
 			}
-			Vec3 tan{ (float)T[0], (float)T[2], (float)T[1] };
+			Vec3 tan{ -(float)T[1], (float)T[2], -(float)T[0] };
 
 			// --- 디듀프 키
 			VtxKey key{ pos, nrm, uv, tan };
