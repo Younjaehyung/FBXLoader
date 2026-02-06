@@ -258,7 +258,7 @@ void FBXLoader::LoadMesh(FbxMesh* mesh)
 {
 	mMeshes.push_back(FbxMeshInfo());
 	FbxMeshInfo& meshInfo = mMeshes.back();
-
+	const bool isSkinnedMesh = (mesh->GetDeformerCount(FbxDeformer::eSkin) > 0);
 	// 이름 설정(기존 로직 유지)
 	if (FbxNode* node = mesh->GetNode())
 	{
@@ -323,13 +323,20 @@ void FBXLoader::LoadMesh(FbxMesh* mesh)
 
 			// --- pos (기존 좌표 스왑 규칙 유지: y↔z)
 			FbxVector4 P = cp[cpIdx];
-			Vec3 pos{ (float)P[1], (float)P[2], -(float)P[0] };
+			Vec3 pos;
+			if (!isSkinnedMesh)
+				pos = { -(float)P[1], (float)P[2], -(float)P[0] };
+			else
+			{
+				pos = { -(float)P[1], (float)P[2], (float)P[0] };
+			}
+			
 
 			// --- normal: 코너 단위로 안전하게
 			FbxVector4 N{};
 			mesh->GetPolygonVertexNormal(i, j, N);
 			N.Normalize();
-			Vec3 nrm{ -(float)N[1], (float)N[2], -(float)N[0] };
+			Vec3 nrm{ -(float)N[1], (float)N[2], (float)N[0] };
 
 			// --- uv: 코너 단위로 안전하게 (V 플립 유지)
 			FbxVector2 UV{};
@@ -573,8 +580,8 @@ void FBXLoader::LoadOffsetMatrix(FbxCluster* cluster, const FbxAMatrix& matNodeT
 	// The transformation of the cluster(joint) at binding time from joint space to world space 
 	cluster->GetTransformLinkMatrix(matClusterLinkTrans);
 
-	FbxVector4 V0 = { 0, 0, -1, 0 };
-	FbxVector4 V1 = { 1, 0, 0, 0 };
+	FbxVector4 V0 = { 0, 0, 1, 0 };
+	FbxVector4 V1 = { -1, 0, 0, 0 };
 	FbxVector4 V2 = { 0, 1, 0, 0 };
 	FbxVector4 V3 = { 0, 0, 0, 1 };
 
@@ -596,8 +603,8 @@ void FBXLoader::LoadKeyframe(int32 animIndex, FbxNode* node, FbxCluster* cluster
 	if (mAnimClips.empty())
 		return;
 
-	FbxVector4	v1 = { 0, 0, -1, 0 };
-	FbxVector4	v2 = { 1, 0, 0, 0 };
+	FbxVector4	v1 = { 0, 0, 1, 0 };
+	FbxVector4	v2 = { -1, 0, 0, 0 };
 	FbxVector4	v3 = { 0, 1, 0, 0 };
 	FbxVector4	v4 = { 0, 0, 0, 1 };
 	FbxAMatrix	matReflect;
