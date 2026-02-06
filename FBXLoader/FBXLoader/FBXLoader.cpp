@@ -323,7 +323,7 @@ void FBXLoader::LoadMesh(FbxMesh* mesh)
 
 			// --- pos (기존 좌표 스왑 규칙 유지: y↔z)
 			FbxVector4 P = cp[cpIdx];
-			Vec3 pos{ -(float)P[1], (float)P[2], -(float)P[0] };
+			Vec3 pos{ (float)P[1], (float)P[2], -(float)P[0] };
 
 			// --- normal: 코너 단위로 안전하게
 			FbxVector4 N{};
@@ -574,7 +574,7 @@ void FBXLoader::LoadOffsetMatrix(FbxCluster* cluster, const FbxAMatrix& matNodeT
 	cluster->GetTransformLinkMatrix(matClusterLinkTrans);
 
 	FbxVector4 V0 = { 0, 0, -1, 0 };
-	FbxVector4 V1 = { -1, 0, 0, 0 };
+	FbxVector4 V1 = { 1, 0, 0, 0 };
 	FbxVector4 V2 = { 0, 1, 0, 0 };
 	FbxVector4 V3 = { 0, 0, 0, 1 };
 
@@ -597,7 +597,7 @@ void FBXLoader::LoadKeyframe(int32 animIndex, FbxNode* node, FbxCluster* cluster
 		return;
 
 	FbxVector4	v1 = { 0, 0, -1, 0 };
-	FbxVector4	v2 = { -1, 0, 0, 0 };
+	FbxVector4	v2 = { 1, 0, 0, 0 };
 	FbxVector4	v3 = { 0, 1, 0, 0 };
 	FbxVector4	v4 = { 0, 0, 0, 1 };
 	FbxAMatrix	matReflect;
