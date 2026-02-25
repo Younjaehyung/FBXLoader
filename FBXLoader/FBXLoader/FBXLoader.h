@@ -1,4 +1,4 @@
-﻿#pragma once
+#pragma once
 
 
 inline XMMATRIX FbxToXM(const FbxAMatrix& m)
@@ -390,8 +390,8 @@ private:
 
 
 	// Animation
-	void LoadBones(FbxNode* node) { LoadBones(node, 0, -1); }
-	void LoadBones(FbxNode* node, int32 idx, int32 parentIdx);
+	void LoadBones(FbxNode* node) { LoadBones(node, -1); }
+	void LoadBones(FbxNode* node, int32 parentBoneIdx = -1);
 	void LoadAnimationInfo();
 
 	void LoadAnimationData(FbxMesh* mesh, FbxMeshInfo* meshInfo);
@@ -443,11 +443,15 @@ private:
 	FbxImporter*	mImporter	= nullptr;
 	string			mResourceDirectory;
 private:
+	std::unordered_map<FbxNode*, int32> mBoneIndexByNode;     // ★ 추가: 노드->본인덱스
+	std::unordered_map<std::string, int32> mBoneIndexByName;  // ★ 선택: 이름->본인덱스(기존 FindBoneIndex 대체 가능)
+
 	vector<FbxMeshInfo>					mMeshes; 
 	vector<FbxBoneInfo>					mBones;
 	vector<FbxAnimClipInfo>				mAnimClips;
 	FbxArray<FbxString*>				mAnimNames;
 private:
+
 	vector<YBMeshInfo>					mBMeshes;
 	vector<YBoneInfo>		mBBones;
 	vector<YAnimClipInfo>	mBAnimClips;

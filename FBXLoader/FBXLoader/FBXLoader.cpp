@@ -33,7 +33,11 @@ void FBXLoader::LoadFbx(const string& path)
 	Import(path);
 
 	// Animation	
-	LoadBones(mScene->GetRootNode());
+	mBoneIndexByNode.clear();
+	mBoneIndexByName.clear();
+	mBones.clear();
+
+	LoadBones(mScene->GetRootNode(), -1);
 	LoadAnimationInfo();
 
 	// Mesh/Material/Skin
@@ -237,17 +241,11 @@ FbxAMatrix FBXLoader::GetTransform(FbxNode* node)
 
 int32 FBXLoader::FindBoneIndex(string name)
 {
-	string boneName = string(name.begin(), name.end());
-
-	for (UINT i = 0; i < mBones.size(); ++i)
-	{
-		if (mBones[i].BoneName == boneName)
-			return i;
-	}
-
+	auto it = mBoneIndexByName.find(name);
+	if (it != mBoneIndexByName.end())
+		return it->second;
 	return -1;
 }
-
 
 /****************************
 *			Loader			*
@@ -452,22 +450,37 @@ void FBXLoader::FillBoneWeightPerVertex(FbxMesh* /*mesh*/, FbxMeshInfo* meshInfo
 }
 
 
-
-void FBXLoader::LoadBones(FbxNode* node, int32 idx, int32 parentIdx)
+void FBXLoader::LoadBones(FbxNode* node, int32 parentBoneIdx /*= -1*/)
 {
+	if (!node) return;
+
 	FbxNodeAttribute* attribute = node->GetNodeAttribute();
+
+	// 이번 노드가 Skeleton이면 본으로 등록
+	int32 thisBoneIdx = parentBoneIdx;
 
 	if (attribute && attribute->GetAttributeType() == FbxNodeAttribute::eSkeleton)
 	{
 		FbxBoneInfo bone;
 		bone.BoneName = node->GetName();
-		bone.ParentIndex = parentIdx;
+		bone.ParentIndex = parentBoneIdx;
+
+		thisBoneIdx = static_cast<int32>(mBones.size()); // ★ 지금 들어갈 인덱스
 		mBones.push_back(bone);
+
+		// ★ 노드->본인덱스 매핑 저장 (부모 찾기/키프레임에서 사용)
+		mBoneIndexByNode[node] = thisBoneIdx;
+
+		// ★ 이름 매핑도 저장(기존 FindBoneIndex 쓰면 없어도 됨)
+		mBoneIndexByName[bone.BoneName] = thisBoneIdx;
 	}
 
+	// 자식 재귀: 스켈레톤 노드면 thisBoneIdx가 부모가 되고, 아니면 parentBoneIdx 유지
 	const int32 childCount = node->GetChildCount();
-	for (int32 i = 0; i < childCount; i++)
-		LoadBones(node->GetChild(i), static_cast<int32>(mBones.size()), idx);
+	for (int32 i = 0; i < childCount; ++i)
+	{
+		LoadBones(node->GetChild(i), thisBoneIdx);
+	}
 }
 
 void FBXLoader::LoadAnimationInfo()
@@ -600,14 +613,15 @@ void FBXLoader::LoadOffsetMatrix(FbxCluster* cluster, const FbxAMatrix& matNodeT
 
 void FBXLoader::LoadKeyframe(int32 animIndex, FbxNode* node, FbxCluster* cluster, const FbxAMatrix& matNodeTransform, int32 boneIdx, FbxMeshInfo* meshInfo)
 {
-	if (mAnimClips.empty())
+	if (mAnimClips.empty() || !cluster || !cluster->GetLink())
 		return;
 
-	FbxVector4	v1 = { 0, 0, 1, 0 };
-	FbxVector4	v2 = { -1, 0, 0, 0 };
-	FbxVector4	v3 = { 0, 1, 0, 0 };
-	FbxVector4	v4 = { 0, 0, 0, 1 };
-	FbxAMatrix	matReflect;
+	// 좌표계 리플렉션(기존 유지)
+	FbxVector4 v1 = { 0, 0, 1, 0 };
+	FbxVector4 v2 = { -1, 0, 0, 0 };
+	FbxVector4 v3 = { 0, 1, 0, 0 };
+	FbxVector4 v4 = { 0, 0, 0, 1 };
+	FbxAMatrix matReflect;
 	matReflect.mData[0] = v1;
 	matReflect.mData[1] = v2;
 	matReflect.mData[2] = v3;
@@ -615,26 +629,49 @@ void FBXLoader::LoadKeyframe(int32 animIndex, FbxNode* node, FbxCluster* cluster
 
 	FbxTime::EMode timeMode = mScene->GetGlobalSettings().GetTimeMode();
 
-	// �ִϸ��̼� �����
+	// 애니 스택 세팅(기존 유지)
 	FbxAnimStack* animStack = mScene->FindMember<FbxAnimStack>(mAnimNames[animIndex]->Buffer());
-	mScene->SetCurrentAnimationStack(OUT animStack);
+	mScene->SetCurrentAnimationStack(animStack);
 
 	FbxLongLong startFrame = mAnimClips[animIndex].StartTime.GetFrameCount(timeMode);
 	FbxLongLong endFrame = mAnimClips[animIndex].EndTime.GetFrameCount(timeMode);
 
-	for (FbxLongLong frame = startFrame; frame < endFrame; frame++)
-	{
-		FbxKeyFrameInfo keyFrameInfo = {};
-		FbxTime fbxTime = 0;
+	FbxNode* boneNode = cluster->GetLink();
 
+	// ★ 부모 본 노드 얻기 (스켈레톤 트리 기준)
+	FbxNode* parentBoneNode = boneNode->GetParent();
+	// "부모가 스켈레톤이 아닐 수"도 있으니, 스켈레톤 노드가 나올 때까지 올라가도 됨
+	while (parentBoneNode && (!parentBoneNode->GetNodeAttribute() ||
+		parentBoneNode->GetNodeAttribute()->GetAttributeType() != FbxNodeAttribute::eSkeleton))
+	{
+		parentBoneNode = parentBoneNode->GetParent();
+	}
+
+	for (FbxLongLong frame = startFrame; frame < endFrame; ++frame)
+	{
+		FbxTime fbxTime;
 		fbxTime.SetFrame(frame, timeMode);
 
-		FbxAMatrix matFromNode = node->EvaluateGlobalTransform(fbxTime);
-		FbxAMatrix matTransform = matFromNode.Inverse() * cluster->GetLink()->EvaluateGlobalTransform(fbxTime);
-		matTransform = matReflect * matTransform * matReflect.Transpose();
+		// ★ 본 글로벌
+		FbxAMatrix boneGlobal = boneNode->EvaluateGlobalTransform(fbxTime);
 
+		// ★ 부모 본 글로벌(없으면 Identity)
+		FbxAMatrix parentGlobal;
+		parentGlobal.SetIdentity();
+		if (parentBoneNode)
+			parentGlobal = parentBoneNode->EvaluateGlobalTransform(fbxTime);
+
+		// =========================================================
+		// ★ 핵심 변경: 부모 기준 로컬 = parent^-1 * bone
+		// =========================================================
+		FbxAMatrix localToParent = parentGlobal.Inverse() * boneGlobal;
+
+		// 좌표계 반사(기존 방식 유지)
+		localToParent = matReflect * localToParent * matReflect.Transpose();
+
+		FbxKeyFrameInfo keyFrameInfo{};
 		keyFrameInfo.Time = fbxTime.GetSecondDouble();
-		keyFrameInfo.MatTransform = matTransform;
+		keyFrameInfo.MatTransform = localToParent;
 
 		mAnimClips[animIndex].KeyFrames[boneIdx].push_back(keyFrameInfo);
 	}
