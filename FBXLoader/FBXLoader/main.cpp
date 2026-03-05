@@ -49,6 +49,9 @@ static bool HasFbxExtension(const fs::path& p)
 	
 int main() {
 
+		// UTF-8
+		SetConsoleOutputCP(CP_UTF8);
+		SetConsoleCP(CP_UTF8);
 
 		FBXLoader loader;
 

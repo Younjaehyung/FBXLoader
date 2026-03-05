@@ -404,8 +404,99 @@ void FBXLoader::LoadMesh(FbxMesh* mesh)
 }
 
 
+void FBXLoader::DumpMaterialProperties(FbxSurfaceMaterial* surface)
+{
+	printf("\n====== Material Dump: \"%s\" (class: %s) ======\n",
+		surface->GetName(),
+		surface->GetClassId().GetFbxFileTypeName(true));
+
+	// 텍스처가 연결된 슬롯
+	printf("--- Texture Slots ---\n");
+	FbxProperty prop = surface->GetFirstProperty();
+	while (prop.IsValid())
+	{
+		int texCount = prop.GetSrcObjectCount<FbxTexture>();
+		if (texCount > 0)
+		{
+			FbxString propName = prop.GetName();	
+			for (int t = 0; t < texCount; ++t)
+			{
+				FbxFileTexture* fileTex = FbxCast<FbxFileTexture>(prop.GetSrcObject<FbxTexture>(t));
+				if (fileTex)
+					printf("  [TEXTURE] prop=\"%s\"  file=\"%s\"\n",
+						propName.Buffer(),
+						fileTex->GetRelativeFileName());
+			}
+		}
+		prop = surface->GetNextProperty(prop);
+	}
+
+	
+	printf("--- Value Properties ---\n");
+	prop = surface->GetFirstProperty();
+	while (prop.IsValid())
+	{
+		
+		if (prop.GetSrcObjectCount<FbxTexture>() == 0)
+		{
+			FbxString propName = prop.GetName();	
+			const char* name = propName.Buffer();
+			EFbxType type = prop.GetPropertyDataType().GetType();
+
+			switch (type)
+			{
+			case eFbxBool:
+				printf("  [bool  ] \"%s\" = %s\n", name, prop.Get<FbxBool>() ? "true" : "false");
+				break;
+			case eFbxInt:
+			case eFbxEnum:
+				printf("  [int   ] \"%s\" = %d\n", name, (int)prop.Get<FbxInt>());
+				break;
+			case eFbxFloat:
+				printf("  [float ] \"%s\" = %.6f\n", name, (float)prop.Get<FbxFloat>());
+				break;
+			case eFbxDouble:
+				printf("  [double] \"%s\" = %.6f\n", name, (double)prop.Get<FbxDouble>());
+				break;
+			case eFbxDouble2:
+			{
+				FbxDouble2 v = prop.Get<FbxDouble2>();
+				printf("  [vec2  ] \"%s\" = (%.4f, %.4f)\n", name, v[0], v[1]);
+				break;
+			}
+			case eFbxDouble3:
+			{
+				FbxDouble3 v = prop.Get<FbxDouble3>();
+				printf("  [vec3  ] \"%s\" = (%.4f, %.4f, %.4f)\n", name, v[0], v[1], v[2]);
+				break;
+			}
+			case eFbxDouble4:
+			{
+				FbxDouble4 v = prop.Get<FbxDouble4>();
+				printf("  [vec4  ] \"%s\" = (%.4f, %.4f, %.4f, %.4f)\n", name, v[0], v[1], v[2], v[3]);
+				break;
+			}
+			case eFbxString:
+			{
+				FbxString val = prop.Get<FbxString>();	// 임시 객체 수명 유지
+				printf("  [string] \"%s\" = \"%s\"\n", name, val.Buffer());
+				break;
+			}
+			default:
+				printf("  [type%-2d] \"%s\"\n", (int)type, name);
+				break;
+			}
+		}
+		prop = surface->GetNextProperty(prop);
+	}
+	printf("======================================================\n\n");
+}
+
 void FBXLoader::LoadMaterial(FbxSurfaceMaterial* surfaceMaterial)
 {
+	// 디버깅용
+	DumpMaterialProperties(surfaceMaterial);
+
 	FbxMaterialInfo material{};
 	MaterialValue materialValue{};
 	materialValue.Diffuse = GetMaterialData(surfaceMaterial, FbxSurfaceMaterial::sDiffuse, FbxSurfaceMaterial::sDiffuseFactor);
@@ -413,14 +504,14 @@ void FBXLoader::LoadMaterial(FbxSurfaceMaterial* surfaceMaterial)
 	materialValue.Specular = GetMaterialData(surfaceMaterial, FbxSurfaceMaterial::sSpecular, FbxSurfaceMaterial::sSpecularFactor);
 
 	//material.name = surfaceMaterial->GetName();
-	
+
 	material.MaterialValueInfo = materialValue;
 	material.ShaderName = ws2s(fs::path(GetTextureRelativeName(surfaceMaterial, FbxSurfaceMaterial::sShadingModel)).filename());
 	material.DiffuseMap0Name = ws2s(fs::path(GetTextureRelativeName(surfaceMaterial, FbxSurfaceMaterial::sDiffuse)).filename());
 	material.NormalMapName = ws2s(fs::path(GetTextureRelativeName(surfaceMaterial, FbxSurfaceMaterial::sNormalMap)).filename());
 	material.EmissiveMapName = ws2s(fs::path(GetTextureRelativeName(surfaceMaterial, FbxSurfaceMaterial::sEmissive)).filename());
 	material.SpecularcMapName = ws2s(fs::path(GetTextureRelativeName(surfaceMaterial, FbxSurfaceMaterial::sSpecular)).filename());
-	
+
 
 	mMeshes.back().Materials.push_back(material);
 }

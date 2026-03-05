@@ -387,6 +387,7 @@ private:
 	// Mesh
 	void LoadMesh(FbxMesh* mesh);
 	void LoadMaterial(FbxSurfaceMaterial* surfaceMaterial);
+	void DumpMaterialProperties(FbxSurfaceMaterial* surface);	// 디버그용: 모든 프로퍼티 콘솔 출력
 
 
 	// Animation
