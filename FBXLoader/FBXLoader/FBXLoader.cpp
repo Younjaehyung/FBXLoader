@@ -213,17 +213,22 @@ string FBXLoader::GetTextureRelativeName(FbxSurfaceMaterial* surface, const char
 {
 	string name;
 
-	FbxProperty textureProperty = surface->FindProperty(materialProperty);
-	if (textureProperty.IsValid())
+	// FindProperty는 커스텀 프로퍼티를 못 찾는 경우가 있으므로 전체 순회
+	FbxProperty prop = surface->GetFirstProperty();
+	while (prop.IsValid())
 	{
-		uint32 count = textureProperty.GetSrcObjectCount();
-
-		if (1 <= count)
+		if (strcmp(prop.GetName().Buffer(), materialProperty) == 0)
 		{
-			FbxFileTexture* texture = textureProperty.GetSrcObject<FbxFileTexture>(0);
-			if (texture)
-				name = texture->GetRelativeFileName();
+			int count = prop.GetSrcObjectCount<FbxTexture>();
+			if (count > 0)
+			{
+				FbxFileTexture* texture = FbxCast<FbxFileTexture>(prop.GetSrcObject<FbxTexture>(0));
+				if (texture)
+					name = texture->GetRelativeFileName();
+			}
+			break;
 		}
+		prop = surface->GetNextProperty(prop);
 	}
 
 	return name;
@@ -505,12 +510,26 @@ void FBXLoader::LoadMaterial(FbxSurfaceMaterial* surfaceMaterial)
 
 	//material.name = surfaceMaterial->GetName();
 
+	Vec4 emissive = GetMaterialData(surfaceMaterial, FbxSurfaceMaterial::sEmissive, FbxSurfaceMaterial::sEmissiveFactor);
+	materialValue.Emission = Vec3(emissive.x, emissive.y, emissive.z);
 	material.MaterialValueInfo = materialValue;
-	material.ShaderName = ws2s(fs::path(GetTextureRelativeName(surfaceMaterial, FbxSurfaceMaterial::sShadingModel)).filename());
+
+	material.ShaderName     = ws2s(fs::path(GetTextureRelativeName(surfaceMaterial, FbxSurfaceMaterial::sShadingModel)).filename());
 	material.DiffuseMap0Name = ws2s(fs::path(GetTextureRelativeName(surfaceMaterial, FbxSurfaceMaterial::sDiffuse)).filename());
-	material.NormalMapName = ws2s(fs::path(GetTextureRelativeName(surfaceMaterial, FbxSurfaceMaterial::sNormalMap)).filename());
 	material.EmissiveMapName = ws2s(fs::path(GetTextureRelativeName(surfaceMaterial, FbxSurfaceMaterial::sEmissive)).filename());
-	material.SpecularcMapName = ws2s(fs::path(GetTextureRelativeName(surfaceMaterial, FbxSurfaceMaterial::sSpecular)).filename());
+
+	// 노말맵: "bump_map" 우선, 없으면 "normalCamera"
+	material.NormalMapName = ws2s(fs::path(GetTextureRelativeName(surfaceMaterial, "bump_map")).filename());
+	if (material.NormalMapName.empty())
+		material.NormalMapName = ws2s(fs::path(GetTextureRelativeName(surfaceMaterial, "normalCamera")).filename());
+
+	// 러프니스맵: "roughness_map" 우선, 없으면 "ShininessExponent"
+	material.SpecularcMapName = ws2s(fs::path(GetTextureRelativeName(surfaceMaterial, "roughness_map")).filename());
+	if (material.SpecularcMapName.empty())
+		material.SpecularcMapName = ws2s(fs::path(GetTextureRelativeName(surfaceMaterial, "ShininessExponent")).filename());
+
+	// 메탈릭맵: "metalness_map"
+	material.MetallicMapName = ws2s(fs::path(GetTextureRelativeName(surfaceMaterial, "metalness_map")).filename());
 
 
 	mMeshes.back().Materials.push_back(material);
