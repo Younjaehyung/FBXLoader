@@ -394,6 +394,7 @@ private:
 	void LoadBones(FbxNode* node) { LoadBones(node, -1); }
 	void LoadBones(FbxNode* node, int32 parentBoneIdx = -1);
 	void LoadAnimationInfo();
+	void LoadAnimationKeyframes();
 
 	void LoadAnimationData(FbxMesh* mesh, FbxMeshInfo* meshInfo);
 	void LoadBoneWeight(FbxCluster* cluster, int32 boneIdx, FbxMeshInfo* meshInfo);
@@ -444,10 +445,11 @@ private:
 	FbxImporter*	mImporter	= nullptr;
 	string			mResourceDirectory;
 private:
-	std::unordered_map<FbxNode*, int32> mBoneIndexByNode;     // ★ 추가: 노드->본인덱스
-	std::unordered_map<std::string, int32> mBoneIndexByName;  // ★ 선택: 이름->본인덱스(기존 FindBoneIndex 대체 가능)
+	std::unordered_map<FbxNode*, int32> mBoneIndexByNode;
+	std::unordered_map<std::string, int32> mBoneIndexByName;
 
-	vector<FbxMeshInfo>					mMeshes; 
+	vector<FbxNode*>					mBoneNodes;
+	vector<FbxMeshInfo>					mMeshes;
 	vector<FbxBoneInfo>					mBones;
 	vector<FbxAnimClipInfo>				mAnimClips;
 	FbxArray<FbxString*>				mAnimNames;

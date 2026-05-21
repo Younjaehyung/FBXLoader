@@ -35,10 +35,12 @@ void FBXLoader::LoadFbx(const string& path)
 	// Animation	
 	mBoneIndexByNode.clear();
 	mBoneIndexByName.clear();
+	mBoneNodes.clear();
 	mBones.clear();
 
 	LoadBones(mScene->GetRootNode(), -1);
 	LoadAnimationInfo();
+	LoadAnimationKeyframes();
 
 	// Mesh/Material/Skin
 	ParseNode(mScene->GetRootNode());
@@ -577,6 +579,7 @@ void FBXLoader::LoadBones(FbxNode* node, int32 parentBoneIdx /*= -1*/)
 
 		thisBoneIdx = static_cast<int32>(mBones.size()); // ★ 지금 들어갈 인덱스
 		mBones.push_back(bone);
+		mBoneNodes.push_back(node);
 
 		// ★ 노드->본인덱스 매핑 저장 (부모 찾기/키프레임에서 사용)
 		mBoneIndexByNode[node] = thisBoneIdx;
@@ -616,6 +619,76 @@ void FBXLoader::LoadAnimationInfo()
 		mAnimClips.push_back(animClip);
 	}
 }
+
+void FBXLoader::LoadAnimationKeyframes()
+{
+	if (mAnimClips.empty() || mBones.empty() || mBoneNodes.size() != mBones.size())
+		return;
+
+	FbxVector4 v1 = { 0, 0, 1, 0 };
+	FbxVector4 v2 = { -1, 0, 0, 0 };
+	FbxVector4 v3 = { 0, 1, 0, 0 };
+	FbxVector4 v4 = { 0, 0, 0, 1 };
+	FbxAMatrix matReflect;
+	matReflect.mData[0] = v1;
+	matReflect.mData[1] = v2;
+	matReflect.mData[2] = v3;
+	matReflect.mData[3] = v4;
+
+	FbxTime::EMode timeMode = mScene->GetGlobalSettings().GetTimeMode();
+	const int32 animCount = mAnimNames.GetCount();
+
+	for (int32 animIndex = 0; animIndex < animCount; ++animIndex)
+	{
+		if (animIndex >= static_cast<int32>(mAnimClips.size()))
+			break;
+
+		FbxAnimStack* animStack = mScene->FindMember<FbxAnimStack>(mAnimNames[animIndex]->Buffer());
+		if (!animStack)
+			continue;
+
+		mScene->SetCurrentAnimationStack(animStack);
+
+		FbxLongLong startFrame = mAnimClips[animIndex].StartTime.GetFrameCount(timeMode);
+		FbxLongLong endFrame = mAnimClips[animIndex].EndTime.GetFrameCount(timeMode);
+
+		for (int32 boneIdx = 0; boneIdx < static_cast<int32>(mBones.size()); ++boneIdx)
+		{
+			FbxNode* boneNode = mBoneNodes[boneIdx];
+			if (!boneNode)
+				continue;
+
+			const int32 parentIdx = mBones[boneIdx].ParentIndex;
+			FbxNode* parentBoneNode = (parentIdx >= 0) ? mBoneNodes[parentIdx] : nullptr;
+
+			auto& keyFrames = mAnimClips[animIndex].KeyFrames[boneIdx];
+			keyFrames.clear();
+
+			for (FbxLongLong frame = startFrame; frame < endFrame; ++frame)
+			{
+				FbxTime fbxTime;
+				fbxTime.SetFrame(frame, timeMode);
+
+				FbxAMatrix boneGlobal = boneNode->EvaluateGlobalTransform(fbxTime);
+
+				FbxAMatrix parentGlobal;
+				parentGlobal.SetIdentity();
+				if (parentBoneNode)
+					parentGlobal = parentBoneNode->EvaluateGlobalTransform(fbxTime);
+
+				FbxAMatrix localToParent = parentGlobal.Inverse() * boneGlobal;
+				localToParent = matReflect * localToParent * matReflect.Transpose();
+
+				FbxKeyFrameInfo keyFrameInfo{};
+				keyFrameInfo.Time = fbxTime.GetSecondDouble();
+				keyFrameInfo.MatTransform = localToParent;
+
+				keyFrames.push_back(keyFrameInfo);
+			}
+		}
+	}
+}
+
 void FBXLoader::LoadAnimationData(FbxMesh* mesh, FbxMeshInfo* meshInfo)
 {
 	const int32 skinCount = mesh->GetDeformerCount(FbxDeformer::eSkin);
@@ -644,14 +717,6 @@ void FBXLoader::LoadAnimationData(FbxMesh* mesh, FbxMeshInfo* meshInfo)
 			FbxAMatrix matNodeTransform = GetTransform(mesh->GetNode());
 			LoadBoneWeight(cluster, boneIdx, meshInfo);
 			LoadOffsetMatrix(cluster, matNodeTransform, boneIdx, meshInfo);
-
-			const int32 animCount = mAnimNames.Size();
-			for (int32 k = 0; k < animCount; k++)
-			{
-				if (!mAnimClips[k].KeyFrames[boneIdx].empty())
-					continue; // 중복 방지
-				LoadKeyframe(k, mesh->GetNode(), cluster, matNodeTransform, boneIdx, meshInfo);
-			}
 		}
 	}
 
