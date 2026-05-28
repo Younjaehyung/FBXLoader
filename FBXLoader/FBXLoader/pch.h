@@ -12,6 +12,7 @@
 #include <algorithm>
 #include <iomanip>
 #include <cfloat>
+#include <cctype>
 #include "SimpleMath.h"
 #include "fbxsdk.h"
 

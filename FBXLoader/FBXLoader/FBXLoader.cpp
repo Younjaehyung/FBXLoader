@@ -236,6 +236,83 @@ string FBXLoader::GetTextureRelativeName(FbxSurfaceMaterial* surface, const char
 	return name;
 }
 
+static string NormalizeMaterialPropertyName(const char* name)
+{
+	string normalized;
+	if (!name)
+		return normalized;
+
+	for (const char* p = name; *p; ++p)
+	{
+		const unsigned char c = static_cast<unsigned char>(*p);
+		if (isalnum(c))
+			normalized.push_back(static_cast<char>(tolower(c)));
+	}
+
+	return normalized;
+}
+
+static string GetFirstTextureRelativeName(FbxProperty prop)
+{
+	const int count = prop.GetSrcObjectCount<FbxTexture>();
+	for (int i = 0; i < count; ++i)
+	{
+		FbxFileTexture* texture = FbxCast<FbxFileTexture>(prop.GetSrcObject<FbxTexture>(i));
+		if (!texture)
+			continue;
+
+		const char* relativeName = texture->GetRelativeFileName();
+		if (relativeName && relativeName[0])
+			return relativeName;
+
+		const char* fileName = texture->GetFileName();
+		if (fileName && fileName[0])
+			return fileName;
+	}
+
+	return {};
+}
+
+string FBXLoader::GetTextureRelativeName(FbxSurfaceMaterial* surface, const vector<string>& materialProperties, const vector<string>& fallbackTokens)
+{
+	// 수정: DCC/엔진마다 FBX texture property 이름이 달라 exact match만으로는 누락된다.
+	// 먼저 명시 후보를 우선순위대로 찾고, 그래도 없으면 정규화한 property 이름에 토큰이 들어가는 texture slot을 fallback으로 선택한다.
+	for (const string& propertyName : materialProperties)
+	{
+		const string exactName = GetTextureRelativeName(surface, propertyName.c_str());
+		if (!exactName.empty())
+			return exactName;
+	}
+
+	vector<string> normalizedTokens;
+	normalizedTokens.reserve(fallbackTokens.size());
+	for (const string& token : fallbackTokens)
+		normalizedTokens.push_back(NormalizeMaterialPropertyName(token.c_str()));
+
+	FbxProperty prop = surface->GetFirstProperty();
+	while (prop.IsValid())
+	{
+		const string propName = NormalizeMaterialPropertyName(prop.GetName().Buffer());
+		if (!propName.empty() && prop.GetSrcObjectCount<FbxTexture>() > 0)
+		{
+			for (const string& token : normalizedTokens)
+			{
+				if (!token.empty() && propName.find(token) != string::npos)
+				{
+					string textureName = GetFirstTextureRelativeName(prop);
+					if (!textureName.empty())
+						return textureName;
+					break;
+				}
+			}
+		}
+
+		prop = surface->GetNextProperty(prop);
+	}
+
+	return {};
+}
+
 FbxAMatrix FBXLoader::GetTransform(FbxNode* node)
 {
 	const FbxVector4 translation = node->GetGeometricTranslation(FbxNode::eSourcePivot);
@@ -257,6 +334,56 @@ int32 FBXLoader::FindBoneIndex(string name)
 /****************************
 *			Loader			*
 *****************************/
+
+// UV를 레이어 엘리먼트에서 직접 해석하는 폴백 (GetPolygonVertexUV 실패/unmapped 시 사용)
+static bool ReadUVFromElement(FbxMesh* mesh, const char* uvSetName,
+	int32 polyIdx, int32 cornerIdx, int32 cpIdx, FbxVector2& outUV)
+{
+	const int32 uvElemCount = mesh->GetElementUVCount();
+	if (uvElemCount <= 0)
+		return false;
+
+	// 이름이 일치하는 UV 엘리먼트 우선, 없으면 0번
+	FbxGeometryElementUV* uvElem = nullptr;
+	if (uvSetName && uvSetName[0])
+	{
+		for (int32 e = 0; e < uvElemCount; ++e)
+		{
+			FbxGeometryElementUV* cand = mesh->GetElementUV(e);
+			if (cand && strcmp(cand->GetName(), uvSetName) == 0) { uvElem = cand; break; }
+		}
+	}
+	if (!uvElem)
+		uvElem = mesh->GetElementUV(0);
+	if (!uvElem)
+		return false;
+
+	const FbxGeometryElement::EMappingMode  mapMode = uvElem->GetMappingMode();
+	const FbxGeometryElement::EReferenceMode refMode = uvElem->GetReferenceMode();
+
+	int32 directIndex = -1;
+	if (mapMode == FbxGeometryElement::eByControlPoint)
+	{
+		directIndex = (refMode == FbxGeometryElement::eDirect)
+			? cpIdx
+			: uvElem->GetIndexArray().GetAt(cpIdx);
+	}
+	else if (mapMode == FbxGeometryElement::eByPolygonVertex)
+	{
+		// eDirect/eIndexToDirect 모두 GetTextureUVIndex가 direct 인덱스를 반환
+		directIndex = mesh->GetTextureUVIndex(polyIdx, cornerIdx);
+	}
+	else
+	{
+		return false;
+	}
+
+	if (directIndex < 0 || directIndex >= uvElem->GetDirectArray().GetCount())
+		return false;
+
+	outUV = uvElem->GetDirectArray().GetAt(directIndex);
+	return true;
+}
 
 
 void FBXLoader::LoadMesh(FbxMesh* mesh)
@@ -289,17 +416,53 @@ void FBXLoader::LoadMesh(FbxMesh* mesh)
 	meshInfo.Indices.clear();
 	meshInfo.Indices.resize(std::max(1, materialCount));
 
-	// UV 세트 이름 얻기
+	// UV 세트 이름 얻기: 디퓨즈 텍스처가 참조하는 세트를 우선, 없으면 0번 세트
 	FbxStringList uvSets;
 	mesh->GetUVSetNames(uvSets);
-	const char* uvSetName = (uvSets.GetCount() > 0) ? uvSets[0] : uvSets[0];
+	const char* uvSetName = (uvSets.GetCount() > 0) ? uvSets[0] : nullptr;
 
-	// 탠젠트 엘리먼트(있을 때만)
+	// 디퓨즈 텍스처(FbxFileTexture)가 지정한 UV 세트가 uvSets에 있으면 그것을 채택
+	if (FbxNode* matNode = mesh->GetNode())
+	{
+		for (int32 m = 0; m < matNode->GetMaterialCount(); ++m)
+		{
+			FbxSurfaceMaterial* mat = matNode->GetMaterial(m);
+			if (!mat) continue;
+
+			FbxProperty diffuseProp = mat->FindProperty(FbxSurfaceMaterial::sDiffuse);
+			if (!diffuseProp.IsValid()) continue;
+
+			FbxFileTexture* tex = FbxCast<FbxFileTexture>(diffuseProp.GetSrcObject<FbxFileTexture>(0));
+			if (!tex) continue;
+
+			const char* texUvSet = tex->UVSet.Get().Buffer();
+			if (texUvSet && texUvSet[0])
+			{
+				for (int32 s = 0; s < uvSets.GetCount(); ++s)
+				{
+					if (strcmp(uvSets[s], texUvSet) == 0) { uvSetName = uvSets[s]; break; }
+				}
+			}
+			break; // 첫 머티리얼 기준
+		}
+	}
+
+	// UV 폴백 추적용
+	int32 uvUnmappedWarn = 0;
+
+	// 수정: FBX에 원본 normal이 있으면 보존한다.
+	// 이전 코드는 GenerateNormals true 호출로 원본 normal을 덮어써서 조명 음영이 언리얼과 달라질 수 있었다.
+	if (mesh->GetElementNormalCount() == 0)
+		mesh->GenerateNormals(false, true);
+
+	// 수정: tangent가 없을 때만 생성한다.
+	// 원본 tangent가 없어서 생성한 경우도 아래에서 다시 가져와 정점에 기록한다.
+	if (mesh->GetElementTangentCount() == 0)
+		mesh->GenerateTangentsData(0, false);
+
+	// 수정: tangent 생성 후 다시 가져와야 생성된 tangent 엘리먼트를 실제 정점에 기록할 수 있다.
+	// 이전 순서는 원본 FBX에 tangent가 없을 때 tanElem이 null로 남아 모든 정점 tangent가 기본값으로 저장될 수 있었다.
 	FbxGeometryElementTangent* tanElem = mesh->GetElementTangent(0);
-
-	// 선택: 안전하게 노멀/탠젠트 생성 (FBX에 없을 수도 있으니)
-	mesh->GenerateNormals(true, true);
-	mesh->GenerateTangentsData(0, true);
 
 	// 디듀프(정점 병합) 맵과 "최종정점→CP" 매핑
 	struct VtxKey {
@@ -341,13 +504,31 @@ void FBXLoader::LoadMesh(FbxMesh* mesh)
 			FbxVector4 N{};
 			mesh->GetPolygonVertexNormal(i, j, N);
 			N.Normalize();
-			Vec3 nrm{ -(float)N[1], (float)N[2], (float)N[0] };
+			// 수정: 정적 mesh의 위치 변환은 {-y, z, -x}이므로 normal도 같은 축 부호를 써야 한다.
+			// 이전에는 static normal의 z에 +x를 넣어 tangent와 normal이 거의 평행해져 노멀맵 음영이 물결처럼 깨졌다.
+			Vec3 nrm;
+			if (!isSkinnedMesh)
+				nrm = { -(float)N[1], (float)N[2], -(float)N[0] };
+			else
+				nrm = { -(float)N[1], (float)N[2], (float)N[0] };
 
 			// --- uv: 코너 단위로 안전하게 (V 플립 유지)
+			//   1) GetPolygonVertexUV (unmapped면 무효 처리)
+			//   2) 실패 시 UV 엘리먼트 직접 해석
+			//   3) 그래도 실패하면 명시적으로 (0,0)을 쓰고 경고한다.
+			//      이전처럼 직전 유효 UV를 재사용하면 다른 삼각형 UV가 섞여 원인 파악이 어려워질 수 있다.
 			FbxVector2 UV{};
 			bool unmapped = false;
-			if (!mesh->GetPolygonVertexUV(i, j, uvSetName, UV, unmapped))
-				UV = FbxVector2(0, 0);
+			bool gotUV = false;
+			if (uvSetName && uvSetName[0])
+				gotUV = mesh->GetPolygonVertexUV(i, j, uvSetName, UV, unmapped) && !unmapped;
+			if (!gotUV)
+				gotUV = ReadUVFromElement(mesh, uvSetName, i, j, cpIdx, UV);
+			if (!gotUV)
+			{
+				UV = FbxVector2(0.0, 0.0);
+				++uvUnmappedWarn;
+			}
 			Vec2 uv{ (float)UV[0], 1.0f - (float)UV[1] };
 
 			// --- tangent: 코너 단위로 해석, 없으면 (1,0,0)
@@ -365,7 +546,13 @@ void FBXLoader::LoadMesh(FbxMesh* mesh)
 				else // eIndexToDirect
 					T = tanElem->GetDirectArray().GetAt(tanElem->GetIndexArray().GetAt(idx));
 			}
-			Vec3 tan{ -(float)T[1], (float)T[2], -(float)T[0] };
+			// 수정: tangent도 mesh 종류별 위치 변환과 같은 x축 부호를 사용한다.
+			// static은 {-y, z, -x}, skinned는 기존 스키닝 좌표계에 맞춰 {-y, z, +x}를 유지한다.
+			Vec3 tan;
+			if (!isSkinnedMesh)
+				tan = { -(float)T[1], (float)T[2], -(float)T[0] };
+			else
+				tan = { -(float)T[1], (float)T[2], (float)T[0] };
 
 			// --- 디듀프 키
 			VtxKey key{ pos, nrm, uv, tan };
@@ -404,6 +591,10 @@ void FBXLoader::LoadMesh(FbxMesh* mesh)
 		meshInfo.Indices[subset].push_back(outIdxTri[2]);
 		meshInfo.Indices[subset].push_back(outIdxTri[1]);
 	}
+
+	if (uvUnmappedWarn > 0)
+		printf("[UV-WARN] mesh=%s  UV 해석 실패 코너 %d개 -> (0,0)으로 대체\n",
+			meshInfo.Name.c_str(), uvUnmappedWarn);
 
 	// --- 스키닝 데이터 (CP 기준 누적 → 최종 정점으로 복사)
 	LoadAnimationData(mesh, &meshInfo);                 // 기존대로 CP에 누적
@@ -516,22 +707,33 @@ void FBXLoader::LoadMaterial(FbxSurfaceMaterial* surfaceMaterial)
 	materialValue.Emission = Vec3(emissive.x, emissive.y, emissive.z);
 	material.MaterialValueInfo = materialValue;
 
-	material.ShaderName     = ws2s(fs::path(GetTextureRelativeName(surfaceMaterial, FbxSurfaceMaterial::sShadingModel)).filename());
-	material.DiffuseMap0Name = ws2s(fs::path(GetTextureRelativeName(surfaceMaterial, FbxSurfaceMaterial::sDiffuse)).filename());
-	material.EmissiveMapName = ws2s(fs::path(GetTextureRelativeName(surfaceMaterial, FbxSurfaceMaterial::sEmissive)).filename());
+	material.ShaderName = ws2s(fs::path(GetTextureRelativeName(surfaceMaterial, FbxSurfaceMaterial::sShadingModel)).filename());
 
-	// 노말맵: "bump_map" 우선, 없으면 "normalCamera"
-	material.NormalMapName = ws2s(fs::path(GetTextureRelativeName(surfaceMaterial, "bump_map")).filename());
-	if (material.NormalMapName.empty())
-		material.NormalMapName = ws2s(fs::path(GetTextureRelativeName(surfaceMaterial, "normalCamera")).filename());
+	// 수정: FBX texture property 이름은 Unreal/Maya/Blender 등 생성 경로마다 다를 수 있다.
+	// exact 후보를 우선순위대로 확인하고, 그래도 없으면 정규화된 property 이름 토큰으로 fallback 검색한다.
+	material.DiffuseMap0Name = ws2s(fs::path(GetTextureRelativeName(surfaceMaterial,
+		{ FbxSurfaceMaterial::sDiffuse, "DiffuseColor", "Diffuse", "BaseColor", "baseColor", "base_color", "Albedo", "albedo" },
+		{ "diffuse", "basecolor", "albedo" })).filename());
 
-	// 러프니스맵: "roughness_map" 우선, 없으면 "ShininessExponent"
-	material.SpecularcMapName = ws2s(fs::path(GetTextureRelativeName(surfaceMaterial, "roughness_map")).filename());
-	if (material.SpecularcMapName.empty())
-		material.SpecularcMapName = ws2s(fs::path(GetTextureRelativeName(surfaceMaterial, "ShininessExponent")).filename());
+	material.EmissiveMapName = ws2s(fs::path(GetTextureRelativeName(surfaceMaterial,
+		{ FbxSurfaceMaterial::sEmissive, "EmissiveColor", "Emissive", "EmissiveMap", "emissive", "emissiveColor", "emission" },
+		{ "emissive", "emission" })).filename());
 
-	// 메탈릭맵: "metalness_map"
-	material.MetallicMapName = ws2s(fs::path(GetTextureRelativeName(surfaceMaterial, "metalness_map")).filename());
+	material.NormalMapName = ws2s(fs::path(GetTextureRelativeName(surfaceMaterial,
+		{ "bump_map", "normalCamera", "NormalMap", "Bump", "BumpMap", "bump", "Normal", "normal_map" },
+		{ "normal", "bump" })).filename());
+
+	material.SpecularcMapName = ws2s(fs::path(GetTextureRelativeName(surfaceMaterial,
+		{ "roughness_map", "Roughness", "RoughnessMap", "roughness", "SpecularRoughness", "ShininessExponent", FbxSurfaceMaterial::sSpecular, "SpecularColor", "Specular" },
+		{ "roughness", "shininess", "gloss", "specular" })).filename());
+
+	material.MetallicMapName = ws2s(fs::path(GetTextureRelativeName(surfaceMaterial,
+		{ "metalness_map", "Metallic", "MetallicMap", "metallic", "Metalness", "metalness" },
+		{ "metallic", "metalness" })).filename());
+
+	material.OcclusionMapName = ws2s(fs::path(GetTextureRelativeName(surfaceMaterial,
+		{ "AmbientOcclusion", "AmbientOcclusionMap", "Occlusion", "OcclusionMap", "ao_map", "AO" },
+		{ "ambientocclusion", "occlusion", "ao" })).filename());
 
 
 	mMeshes.back().Materials.push_back(material);

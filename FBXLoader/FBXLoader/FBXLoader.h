@@ -379,6 +379,7 @@ private:
 	void		GetUV(FbxMesh* mesh, FbxMeshInfo* container, int32 idx, int32 vertexCounter);
 	Vec4		GetMaterialData(FbxSurfaceMaterial* surface, const char* materialName, const char* factorName);
 	string		GetTextureRelativeName(FbxSurfaceMaterial* surface, const char* materialProperty);
+	string		GetTextureRelativeName(FbxSurfaceMaterial* surface, const vector<string>& materialProperties, const vector<string>& fallbackTokens);
 	int32		FindBoneIndex(string name);
 	FbxAMatrix	GetTransform(FbxNode* node);
 
