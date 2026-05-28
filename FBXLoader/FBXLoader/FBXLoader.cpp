@@ -370,8 +370,19 @@ static bool ReadUVFromElement(FbxMesh* mesh, const char* uvSetName,
 	}
 	else if (mapMode == FbxGeometryElement::eByPolygonVertex)
 	{
-		// eDirect/eIndexToDirect 모두 GetTextureUVIndex가 direct 인덱스를 반환
-		directIndex = mesh->GetTextureUVIndex(polyIdx, cornerIdx);
+		const int32 polygonVertexIndex = mesh->GetPolygonVertexIndex(polyIdx) + cornerIdx;
+		// 수정: ByPolygonVertex + eDirect UV는 UVIndex가 없을 수 있으므로 polygon vertex index를 직접 사용한다.
+		// 이전처럼 GetTextureUVIndex만 쓰면 -1이 반환되어 대량의 UV가 (0,0)으로 대체될 수 있다.
+		if (refMode == FbxGeometryElement::eDirect)
+		{
+			directIndex = polygonVertexIndex;
+		}
+		else
+		{
+			if (polygonVertexIndex < 0 || polygonVertexIndex >= uvElem->GetIndexArray().GetCount())
+				return false;
+			directIndex = uvElem->GetIndexArray().GetAt(polygonVertexIndex);
+		}
 	}
 	else
 	{
@@ -383,6 +394,112 @@ static bool ReadUVFromElement(FbxMesh* mesh, const char* uvSetName,
 
 	outUV = uvElem->GetDirectArray().GetAt(directIndex);
 	return true;
+}
+
+static float DotVec3(const Vec3& a, const Vec3& b)
+{
+	return a.x * b.x + a.y * b.y + a.z * b.z;
+}
+
+static float LengthSqVec3(const Vec3& v)
+{
+	return DotVec3(v, v);
+}
+
+static Vec3 CrossVec3(const Vec3& a, const Vec3& b)
+{
+	return Vec3(
+		a.y * b.z - a.z * b.y,
+		a.z * b.x - a.x * b.z,
+		a.x * b.y - a.y * b.x);
+}
+
+static Vec3 NormalizeSafeVec3(const Vec3& v, const Vec3& fallback)
+{
+	const float lenSq = LengthSqVec3(v);
+	if (lenSq <= 1e-12f)
+		return fallback;
+
+	const float invLen = 1.0f / sqrtf(lenSq);
+	return Vec3(v.x * invLen, v.y * invLen, v.z * invLen);
+}
+
+static Vec3 MakeFallbackTangent(const Vec3& normal)
+{
+	const Vec3 axis = (fabsf(normal.y) < 0.9f) ? Vec3(0.0f, 1.0f, 0.0f) : Vec3(1.0f, 0.0f, 0.0f);
+	return NormalizeSafeVec3(CrossVec3(axis, normal), Vec3(1.0f, 0.0f, 0.0f));
+}
+
+static void RebuildInvalidTangentsFromUV(FbxMeshInfo& meshInfo)
+{
+	const size_t vertexCount = meshInfo.Vertices.size();
+	if (vertexCount == 0)
+		return;
+
+	int32 invalidCount = 0;
+	for (const Vertex& v : meshInfo.Vertices)
+	{
+		if (LengthSqVec3(v.tangent) <= 1e-8f)
+			++invalidCount;
+	}
+
+	if (invalidCount == 0)
+		return;
+
+	const bool rebuildAll = invalidCount > static_cast<int32>(vertexCount / 2);
+	vector<Vec3> tangentSums(vertexCount, Vec3(0.0f, 0.0f, 0.0f));
+
+	for (const vector<uint32>& subset : meshInfo.Indices)
+	{
+		for (size_t i = 0; i + 2 < subset.size(); i += 3)
+		{
+			const uint32 i0 = subset[i + 0];
+			const uint32 i1 = subset[i + 1];
+			const uint32 i2 = subset[i + 2];
+			if (i0 >= vertexCount || i1 >= vertexCount || i2 >= vertexCount)
+				continue;
+
+			const Vertex& v0 = meshInfo.Vertices[i0];
+			const Vertex& v1 = meshInfo.Vertices[i1];
+			const Vertex& v2 = meshInfo.Vertices[i2];
+
+			const Vec3 edge1 = v1.pos - v0.pos;
+			const Vec3 edge2 = v2.pos - v0.pos;
+			const Vec2 duv1 = v1.uv - v0.uv;
+			const Vec2 duv2 = v2.uv - v0.uv;
+
+			const float det = duv1.x * duv2.y - duv1.y * duv2.x;
+			if (fabsf(det) <= 1e-8f)
+				continue;
+
+			const float invDet = 1.0f / det;
+			const Vec3 tangent = (edge1 * duv2.y - edge2 * duv1.y) * invDet;
+			if (LengthSqVec3(tangent) <= 1e-8f)
+				continue;
+
+			tangentSums[i0] += tangent;
+			tangentSums[i1] += tangent;
+			tangentSums[i2] += tangent;
+		}
+	}
+
+	int32 rebuiltCount = 0;
+	for (size_t i = 0; i < vertexCount; ++i)
+	{
+		if (!rebuildAll && LengthSqVec3(meshInfo.Vertices[i].tangent) > 1e-8f)
+			continue;
+
+		const Vec3 normal = NormalizeSafeVec3(meshInfo.Vertices[i].normal, Vec3(0.0f, 1.0f, 0.0f));
+		Vec3 tangent = tangentSums[i];
+		tangent = tangent - normal * DotVec3(normal, tangent);
+		meshInfo.Vertices[i].tangent = NormalizeSafeVec3(tangent, MakeFallbackTangent(normal));
+		++rebuiltCount;
+	}
+
+	// 수정: FBX에 tangent element가 있어도 값이 전부 0인 경우가 있다.
+	// normal map은 TBN이 필요하므로 0 tangent를 UV와 position으로 재생성한다.
+	printf("[TANGENT-WARN] mesh=%s  invalid tangent %d/%zu -> rebuilt %d from UV\n",
+		meshInfo.Name.c_str(), invalidCount, vertexCount, rebuiltCount);
 }
 
 
@@ -591,10 +708,10 @@ void FBXLoader::LoadMesh(FbxMesh* mesh)
 		meshInfo.Indices[subset].push_back(outIdxTri[2]);
 		meshInfo.Indices[subset].push_back(outIdxTri[1]);
 	}
-
 	if (uvUnmappedWarn > 0)
-		printf("[UV-WARN] mesh=%s  UV 해석 실패 코너 %d개 -> (0,0)으로 대체\n",
-			meshInfo.Name.c_str(), uvUnmappedWarn);
+		printf("[UV-WARN] mesh=%s  UV encoding error coner %d -> (0,0) change \n",meshInfo.Name.c_str(), uvUnmappedWarn);
+
+	RebuildInvalidTangentsFromUV(meshInfo);
 
 	// --- 스키닝 데이터 (CP 기준 누적 → 최종 정점으로 복사)
 	LoadAnimationData(mesh, &meshInfo);                 // 기존대로 CP에 누적

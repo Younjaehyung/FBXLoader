@@ -13,6 +13,7 @@
 #include <iomanip>
 #include <cfloat>
 #include <cctype>
+#include <cmath>
 #include "SimpleMath.h"
 #include "fbxsdk.h"
 
