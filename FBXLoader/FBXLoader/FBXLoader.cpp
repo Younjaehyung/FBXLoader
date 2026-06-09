@@ -536,9 +536,16 @@ void FBXLoader::LoadMesh(FbxMesh* mesh)
 	// UV 세트 이름 얻기: 디퓨즈 텍스처가 참조하는 세트를 우선, 없으면 0번 세트
 	FbxStringList uvSets;
 	mesh->GetUVSetNames(uvSets);
-	const char* uvSetName = (uvSets.GetCount() > 0) ? uvSets[0] : nullptr;
+	// 수정: FbxStringList::operator[]가 돌려주는 const char*는 오래 들고 있으면 무효가 되므로
+	// (allSets는 즉시 복사라 멀쩡, uvSetName은 포인터 저장이라 나중에 쓰레기가 됨),
+	// 이름 바이트를 std::string으로 즉시 복사해 소유한다.
+	string uvSetName;
+	if (uvSets.GetCount() > 0 && uvSets[0])
+		uvSetName = uvSets[0];
 
 	// 디퓨즈 텍스처(FbxFileTexture)가 지정한 UV 세트가 uvSets에 있으면 그것을 채택
+	string diagTexUvSet = "(none)"; // [진단] 텍스처가 가리킨 UVSet 이름
+	bool   diagMatched = false;     // [진단] 그 이름이 실제 세트와 매칭됐는지
 	if (FbxNode* matNode = mesh->GetNode())
 	{
 		for (int32 m = 0; m < matNode->GetMaterialCount(); ++m)
@@ -552,16 +559,36 @@ void FBXLoader::LoadMesh(FbxMesh* mesh)
 			FbxFileTexture* tex = FbxCast<FbxFileTexture>(diffuseProp.GetSrcObject<FbxFileTexture>(0));
 			if (!tex) continue;
 
-			const char* texUvSet = tex->UVSet.Get().Buffer();
+			// 수정: tex->UVSet.Get()은 FbxString을 값으로 반환하므로, 임시를 변수로 받아
+			// 수명을 유지해야 한다. 이전처럼 .Buffer()를 바로 const char*에 담으면
+			// 세미콜론 직후 임시가 파괴되어 댕글링 포인터(쓰레기값)가 되고,
+			// strcmp 결과가 비결정적이 되어 UV 세트가 무작위로 바뀌었다.
+			const FbxString texUvSetStr = tex->UVSet.Get();
+			const char* texUvSet = texUvSetStr.Buffer();
 			if (texUvSet && texUvSet[0])
 			{
+				diagTexUvSet = texUvSet;
 				for (int32 s = 0; s < uvSets.GetCount(); ++s)
 				{
-					if (strcmp(uvSets[s], texUvSet) == 0) { uvSetName = uvSets[s]; break; }
+					if (strcmp(uvSets[s], texUvSet) == 0) { uvSetName = uvSets[s]; diagMatched = true; break; }
 				}
 			}
 			break; // 첫 머티리얼 기준
 		}
+	}
+
+	// [진단] 어떤 메쉬가 어느 UV 세트를 골랐는지 출력
+	{
+		string allSets;
+		for (int32 s = 0; s < uvSets.GetCount(); ++s)
+		{
+			if (s > 0) allSets += ", ";
+			allSets += uvSets[s];
+		}
+		printf("[UV-SET] mesh=%s  skinned=%d  sets=%d [%s]  chosen='%s'  texUVSet='%s' matched=%d\n",
+			meshInfo.Name.c_str(), isSkinnedMesh ? 1 : 0, uvSets.GetCount(),
+			allSets.c_str(), uvSetName.empty() ? "(null)" : uvSetName.c_str(),
+			diagTexUvSet.c_str(), diagMatched ? 1 : 0);
 	}
 
 	// UV 폴백 추적용
@@ -597,6 +624,26 @@ void FBXLoader::LoadMesh(FbxMesh* mesh)
 	std::unordered_map<VtxKey, uint32, VtxKeyHash> dedup;
 	std::vector<uint32> cpOfVertex; // 최종 정점 → 원래 CP 인덱스
 
+	// 수정: 지오메트릭(피벗) 변환을 정적 메쉬 정점에 베이크한다.
+	// 엔진은 노드 글로벌 트랜스폼만 따로 적용하고 FBX 고유의 지오메트릭 변환은 모르므로,
+	// 이걸 로컬 정점에 미리 반영하지 않으면 피벗이 0이 아닌 오브젝트가 어긋나 이음새에 빈틈이 생긴다.
+	// 노드 글로벌 변환은 엔진이 처리하므로 베이크하지 않는다(이중 적용 방지).
+	// 스키닝 메쉬는 클러스터 행렬에서 이미 처리되므로 적용하지 않는다.
+	FbxNode* meshNode = mesh->GetNode();
+	FbxAMatrix geomTransform;    geomTransform.SetIdentity();    // 위치용 (회전+스케일+이동)
+	FbxAMatrix geomLinear;       geomLinear.SetIdentity();       // 탄젠트용 (회전+스케일, 이동 제외)
+	FbxAMatrix geomNormalMatrix; geomNormalMatrix.SetIdentity(); // 노멀용 (역전치)
+	bool hasGeom = false;
+	if (!isSkinnedMesh && meshNode)
+	{
+		geomTransform = GetTransform(meshNode);
+		geomLinear = FbxAMatrix(FbxVector4(0, 0, 0),
+			meshNode->GetGeometricRotation(FbxNode::eSourcePivot),
+			meshNode->GetGeometricScaling(FbxNode::eSourcePivot));
+		geomNormalMatrix = geomLinear.Inverse().Transpose();
+		hasGeom = !geomTransform.IsIdentity();
+	}
+
 	const int32 triCount = mesh->GetPolygonCount();
 	for (int32 i = 0; i < triCount; ++i)
 	{
@@ -607,7 +654,8 @@ void FBXLoader::LoadMesh(FbxMesh* mesh)
 			const int32 cpIdx = mesh->GetPolygonVertex(i, j);
 
 			// --- pos (기존 좌표 스왑 규칙 유지: y↔z)
-			FbxVector4 P = cp[cpIdx];
+			// 지오메트릭 변환을 FBX 공간에서 먼저 적용한 뒤 축 스왑한다.
+			FbxVector4 P = geomTransform.MultT(cp[cpIdx]);
 			Vec3 pos;
 			if (!isSkinnedMesh)
 				pos = { -(float)P[1], (float)P[2], -(float)P[0] };
@@ -620,6 +668,8 @@ void FBXLoader::LoadMesh(FbxMesh* mesh)
 			// --- normal: 코너 단위로 안전하게
 			FbxVector4 N{};
 			mesh->GetPolygonVertexNormal(i, j, N);
+			N = geomNormalMatrix.MultT(N);
+			N[3] = 0.0; // 방향 벡터이므로 이동 성분 제거
 			N.Normalize();
 			// 수정: 정적 mesh의 위치 변환은 {-y, z, -x}이므로 normal도 같은 축 부호를 써야 한다.
 			// 이전에는 static normal의 z에 +x를 넣어 tangent와 normal이 거의 평행해져 노멀맵 음영이 물결처럼 깨졌다.
@@ -637,10 +687,10 @@ void FBXLoader::LoadMesh(FbxMesh* mesh)
 			FbxVector2 UV{};
 			bool unmapped = false;
 			bool gotUV = false;
-			if (uvSetName && uvSetName[0])
-				gotUV = mesh->GetPolygonVertexUV(i, j, uvSetName, UV, unmapped) && !unmapped;
+			if (!uvSetName.empty())
+				gotUV = mesh->GetPolygonVertexUV(i, j, uvSetName.c_str(), UV, unmapped) && !unmapped;
 			if (!gotUV)
-				gotUV = ReadUVFromElement(mesh, uvSetName, i, j, cpIdx, UV);
+				gotUV = ReadUVFromElement(mesh, uvSetName.c_str(), i, j, cpIdx, UV);
 			if (!gotUV)
 			{
 				UV = FbxVector2(0.0, 0.0);
@@ -663,6 +713,8 @@ void FBXLoader::LoadMesh(FbxMesh* mesh)
 				else // eIndexToDirect
 					T = tanElem->GetDirectArray().GetAt(tanElem->GetIndexArray().GetAt(idx));
 			}
+			T = geomLinear.MultT(T);
+			T[3] = 0.0; // 방향 벡터이므로 이동 성분 제거
 			// 수정: tangent도 mesh 종류별 위치 변환과 같은 x축 부호를 사용한다.
 			// static은 {-y, z, -x}, skinned는 기존 스키닝 좌표계에 맞춰 {-y, z, +x}를 유지한다.
 			Vec3 tan;
@@ -710,6 +762,9 @@ void FBXLoader::LoadMesh(FbxMesh* mesh)
 	}
 	if (uvUnmappedWarn > 0)
 		printf("[UV-WARN] mesh=%s  UV encoding error coner %d -> (0,0) change \n",meshInfo.Name.c_str(), uvUnmappedWarn);
+
+	if (hasGeom)
+		printf("[GEOM] mesh=%s  지오메트릭 변환 베이크 적용됨 (피벗 오프셋 보정)\n", meshInfo.Name.c_str());
 
 	RebuildInvalidTangentsFromUV(meshInfo);
 
