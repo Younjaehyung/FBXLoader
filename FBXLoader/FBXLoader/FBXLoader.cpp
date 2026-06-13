@@ -313,6 +313,88 @@ string FBXLoader::GetTextureRelativeName(FbxSurfaceMaterial* surface, const vect
 	return {};
 }
 
+// FbxProperty에서 스칼라(float) 값을 읽는다. 타입이 제각각이라 타입별로 분기한다.
+// NaN/inf 등 비정상 값은 읽기 실패로 처리해 호출부에서 기본값으로 대체되게 한다.
+static bool ReadScalarFromProperty(FbxProperty prop, float& out)
+{
+	float v = 0.f;
+	switch (prop.GetPropertyDataType().GetType())
+	{
+	case eFbxFloat:		v = static_cast<float>(prop.Get<FbxFloat>());	break;
+	case eFbxDouble:	v = static_cast<float>(prop.Get<FbxDouble>());	break;
+	case eFbxInt:
+	case eFbxEnum:		v = static_cast<float>(prop.Get<FbxInt>());		break;
+	case eFbxBool:		v = prop.Get<FbxBool>() ? 1.f : 0.f;			break;
+	case eFbxDouble3:	{ FbxDouble3 d = prop.Get<FbxDouble3>(); v = static_cast<float>(d[0]); break; }
+	default:			return false;
+	}
+
+	if (!std::isfinite(v))	// NaN / inf 차단
+		return false;
+
+	out = v;
+	return true;
+}
+
+// 머티리얼에서 스칼라 값(Metallic, Roughness 등)을 추출한다.
+// 1) 명시 후보 이름을 우선순위대로 exact match
+// 2) 못 찾으면 정규화한 property 이름에 fallback 토큰이 포함되는지 검색
+// 텍스처가 연결된 슬롯은 스칼라 값이 아니므로 제외한다.
+float FBXLoader::GetMaterialScalar(FbxSurfaceMaterial* surface,
+	const vector<string>& propertyNames,
+	const vector<string>& fallbackTokens,
+	float defaultValue)
+{
+	float value = 0.f;
+
+	// 1) 명시 후보 우선순위대로 exact match
+	for (const string& name : propertyNames)
+	{
+		FbxProperty prop = surface->FindProperty(name.c_str());
+		if (prop.IsValid() && prop.GetSrcObjectCount<FbxTexture>() == 0 && ReadScalarFromProperty(prop, value))
+			return value;
+	}
+
+	// 2) fallback: 정규화된 property 이름에 토큰 포함 검색
+	vector<string> normalizedTokens;
+	normalizedTokens.reserve(fallbackTokens.size());
+	for (const string& token : fallbackTokens)
+		normalizedTokens.push_back(NormalizeMaterialPropertyName(token.c_str()));
+
+	FbxProperty prop = surface->GetFirstProperty();
+	while (prop.IsValid())
+	{
+		if (prop.GetSrcObjectCount<FbxTexture>() == 0)
+		{
+			const string propName = NormalizeMaterialPropertyName(prop.GetName().Buffer());
+			if (!propName.empty())
+			{
+				for (const string& token : normalizedTokens)
+				{
+					if (!token.empty() && propName.find(token) != string::npos && ReadScalarFromProperty(prop, value))
+						return value;
+				}
+			}
+		}
+		prop = surface->GetNextProperty(prop);
+	}
+
+	return defaultValue;
+}
+
+// 스칼라 값을 [0,1]로 클램프한다. 범위를 벗어나면(0~100, 0~255 등 다른 스케일로 저장된
+// 파일이거나 잘못된 값) 경고를 찍어 사용자가 알아챌 수 있게 한다.
+static float ClampUnitWithWarn(const char* label, const char* matName, float v)
+{
+	if (v < 0.f || v > 1.f)
+	{
+		printf("[MAT-WARN] mat=\"%s\" %s=%.4f 가 [0,1] 범위 밖 -> 클램프\n",
+			matName ? matName : "?", label, v);
+		v = (v < 0.f) ? 0.f : 1.f;
+	}
+	return v;
+}
+
 FbxAMatrix FBXLoader::GetTransform(FbxNode* node)
 {
 	const FbxVector4 translation = node->GetGeometricTranslation(FbxNode::eSourcePivot);
@@ -877,6 +959,30 @@ void FBXLoader::LoadMaterial(FbxSurfaceMaterial* surfaceMaterial)
 
 	Vec4 emissive = GetMaterialData(surfaceMaterial, FbxSurfaceMaterial::sEmissive, FbxSurfaceMaterial::sEmissiveFactor);
 	materialValue.Emission = Vec3(emissive.x, emissive.y, emissive.z);
+
+	const char* matName = surfaceMaterial->GetName();
+
+	// PBR 스칼라 값. DCC/엔진마다 property 이름이 달라 후보 + fallback 토큰으로 검색한다.
+	materialValue.Metallic = ClampUnitWithWarn("Metallic", matName, GetMaterialScalar(surfaceMaterial,
+		{ "Metallic", "MetallicFactor", "Metalness", "metalness", "metallic" },
+		{ "metallic", "metalness" }, 0.f));
+
+	// Roughness 후보가 없으면 Phong Shininess를 0~1 거칠기로 환산해 fallback.
+	float roughness = GetMaterialScalar(surfaceMaterial,
+		{ "Roughness", "RoughnessFactor", "roughness", "SpecularRoughness" },
+		{ "roughness" }, -1.f);
+	if (roughness < 0.f)
+	{
+		const float shininess = GetMaterialScalar(surfaceMaterial,
+			{ FbxSurfaceMaterial::sShininess, "Shininess", "ShininessExponent" },
+			{ "shininess", "glossiness", "gloss" }, -1.f);
+		// shininess(반짝임 지수)는 클수록 매끈함 → roughness = sqrt(2/(s+2)) 근사
+		roughness = (shininess > 0.f)
+			? std::sqrt(2.f / (shininess + 2.f))
+			: 1.f; // 정보가 없으면 완전 거칠기(=난반사)로 둔다
+	}
+	materialValue.Roughness = ClampUnitWithWarn("Roughness", matName, roughness);
+
 	material.MaterialValueInfo = materialValue;
 
 	material.ShaderName = ws2s(fs::path(GetTextureRelativeName(surfaceMaterial, FbxSurfaceMaterial::sShadingModel)).filename());
@@ -907,6 +1013,16 @@ void FBXLoader::LoadMaterial(FbxSurfaceMaterial* surfaceMaterial)
 		{ "AmbientOcclusion", "AmbientOcclusionMap", "Occlusion", "OcclusionMap", "ao_map", "AO" },
 		{ "ambientocclusion", "occlusion", "ao" })).filename());
 
+	// OcclusionMask / AlphaTest는 표준 FBX 머티리얼 속성이 아닌 엔진 플래그라
+	// FBX에 직접 대응값이 없다. 아래는 휴리스틱이므로 엔진 규약에 맞게 조정 가능.
+	// OcclusionMask: AO 맵이 연결돼 있으면 AO를 사용한다는 의미로 1.
+	material.MaterialValueInfo.OcclusionMask = material.OcclusionMapName.empty() ? 0u : 1u;
+
+	// AlphaTest: FBX 표준 TransparencyFactor(0=불투명)가 0보다 크면 알파 컷아웃을 켠다.
+	const float transparency = GetMaterialScalar(surfaceMaterial,
+		{ FbxSurfaceMaterial::sTransparencyFactor, "TransparencyFactor" },
+		{ "transparencyfactor" }, 0.f);
+	material.MaterialValueInfo.AlphaTest = (transparency > 1e-4f) ? 1u : 0u;
 
 	mMeshes.back().Materials.push_back(material);
 }

@@ -378,6 +378,7 @@ private:
 	void		GetTangent(FbxMesh* mesh, FbxMeshInfo* container, int32 idx, int32 vertexCounter);
 	void		GetUV(FbxMesh* mesh, FbxMeshInfo* container, int32 idx, int32 vertexCounter);
 	Vec4		GetMaterialData(FbxSurfaceMaterial* surface, const char* materialName, const char* factorName);
+	float		GetMaterialScalar(FbxSurfaceMaterial* surface, const vector<string>& propertyNames, const vector<string>& fallbackTokens, float defaultValue);
 	string		GetTextureRelativeName(FbxSurfaceMaterial* surface, const char* materialProperty);
 	string		GetTextureRelativeName(FbxSurfaceMaterial* surface, const vector<string>& materialProperties, const vector<string>& fallbackTokens);
 	int32		FindBoneIndex(string name);
